@@ -1,0 +1,99 @@
+% =====================================================================================================================
+% IEEE two-column version of the combined manuscript (Studies I-III), derived from the Elsevier version in ../submission.
+%   Sections I-VI in sections/*.tex; appendix and back matter in sections/backmatter.tex; references in sections/references.tex.
+%   tables/ and figures/ are copies of the generated outputs (python tools/pack_overleaf.py --ieee; never retype a number).
+% Compile with pdfLaTeX (Overleaf) or Tectonic. Red [TODO: ...] markers are the only places that need the authors' input.
+% =====================================================================================================================
+\documentclass[journal]{IEEEtran}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{cite}
+\usepackage{url}
+\usepackage{xcolor}
+\usepackage{siunitx}
+\usepackage{adjustbox}
+\usepackage[hidelinks]{hyperref}
+
+\def\UrlBreaks{\do\/\do\.\do\_\do\-}
+\setlength{\emergencystretch}{2em}
+% Many result floats: let more of them share a page so they stay close to the text that cites them.
+\renewcommand{\topfraction}{0.9}\renewcommand{\dbltopfraction}{0.9}\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.7}\renewcommand{\dblfloatpagefraction}{0.7}
+\setcounter{topnumber}{4}\setcounter{dbltopnumber}{4}\setcounter{totalnumber}{6}
+
+% Red placeholder for text only the authors can supply.
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+% Figure that shows a red box instead of stopping the build if the file is missing.
+\newcommand{\safefig}[2][\linewidth]{%
+  \IfFileExists{#2}%
+    {\includegraphics[width=#1]{#2}}%
+    {\fbox{\parbox[c][2.4cm][c]{0.92\linewidth}{\centering\todo{missing figure #2}}}}}
+\providecommand{\doi}[1]{\url{https://doi.org/#1}}
+% Generated result table (tables/<name>.tex, written by the statistics scripts; never retyped), shrunk to fit:
+% \restable{name} in a one-column table, \restable[\textwidth]{name} in a table*.
+\newcommand{\restable}[2][\columnwidth]{\begin{adjustbox}{max width=#1}\footnotesize\input{tables/#2.tex}\end{adjustbox}}
+
+\begin{document}
+
+\title{Explainable and Hallucination-Aware Cross-Modality Learning from Chest CT for X-Ray Disease Classification:
+Lesion-Faithful Bone Suppression and Swin Transformer Knowledge Transfer}
+
+\author{Tanvir~Hossin\todo{remaining authors}%
+\thanks{T.~Hossin is with the Department of Computer Science and Engineering, Daffodil International University, Savar, Dhaka,
+Bangladesh. \todo{affiliations of the other authors}}%
+\thanks{Corresponding author: \todo{name and e-mail address}.}%
+\thanks{This retrospective study used public data sets under their licences, VinDr-RibCXR under its data use agreement, and the
+paediatric BDCXR-3257 radiographs under ethical approval REC-FSIT-2025/No:~11928 of Daffodil International University and a data use
+agreement with Dr.~M~R~Khan Shishu Hospital \& Institute of Child Health, Dhaka. No new patient data were collected.}}
+
+\markboth{\todo{journal name}}{Hossin \MakeLowercase{\textit{et al.}}: Cross-Modality Learning from Chest CT for X-Ray Classification}
+
+\maketitle
+
+\begin{abstract}
+\textbf{Background:} Chest CT can supervise radiograph models, but such models may erase lesions, report findings that are absent or
+explain their decisions with misplaced maps, and accuracy metrics miss all three failures. We built CT-supervised bone suppressors and
+Swin radiograph classifiers and tested their lesion fidelity, hallucinations and explanations under pre-specified, hash-frozen analysis
+plans.
+\textbf{Methods:} Study~I measures lesion absorption $A$, the fraction of a counterfactual nodule moved into the predicted bone image,
+and trains suppressors on public CT-derived projections with a twin lesion-invariance regulariser. Study~II tests whether classifiers gain
+from the suppressed images (175 runs, three datasets, capacity-matched controls). Study~III distils a 2.5D Swin CT teacher (CT-RATE) into
+Swin X-ray models through paired projections and tests the resulting NIH classifiers for accuracy, heat-map agreement, localisation and
+hallucination.
+\textbf{Results:} On VinDr-RibCXR the twin ensemble absorbed 0.051 of an added lesion, a released model 0.149 and a matched control
+0.178, at non-inferior bone-region PSNR. Given as separate streams, suppressed inputs did not raise macro-AUROC on any dataset (NIH
+$+0.0001$ $[-0.0022, 0.0024]$); as extra channels they gave small gains (NIH up to $+0.006$). CT distillation did not improve NIH
+classification ($-0.0001$ $[-0.0016, 0.0014]$), and CT and X-ray Grad-CAM++ maps disagreed. Swin Grad-CAM++ located expert boxes less
+than half as often as DenseNet-121, yet noise flipped far fewer finding-free images for Swin (27--29\,\% against 78\,\%).
+\textbf{Conclusion:} Models of equal fidelity or accuracy differ widely in what they erase, invent and highlight, and these properties
+should be audited. A twin regulariser reduces lesion erasure; multi-stream suppressed inputs and CT distillation did not improve
+classification.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Bone suppression, chest radiography, counterfactual evaluation, cross-modality knowledge distillation, explainable artificial
+intelligence, hallucination, Swin transformer, uncertainty quantification.
+\end{IEEEkeywords}
+
+\input{sections/introduction}
+\input{sections/related_work}
+
+\input{sections/methods}
+\input{sections/results}
+\input{sections/discussion}
+\input{sections/conclusion}
+\input{sections/backmatter}
+
+% References: thebibliography frozen from BibTeX (see the header of sections/references.tex to regenerate).
+\input{sections/references}
+
+\end{document}

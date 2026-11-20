@@ -1,0 +1,343 @@
+% ---------------------------------------------------------------------------------------------------------------------
+\subsection{Study~II: Multi-Stream Classifier Architecture and Capacity-Matched Controls}
+\label{sec:m-study2}
+
+\subsubsection{Rationale}
+With the frozen suppressor ensemble $\bar f$ of Study~I, a classifier can receive the radiograph $X$, the soft-tissue image
+$S=X-\bar f(X)$ and the bone image $\hat B=\mathrm{clip}_{[0,1]}(X-S)$ on the stored 8-bit scale. Because $(S,\hat B)$ is a deterministic
+function of $X$, the inputs carry no new information about a label $Y$:
+\begin{equation}
+I\big(Y;\,X,S,\hat B\big)=I\big(Y;\,X\big).
+\label{eq:info}
+\end{equation}
+A gain can therefore come only from the prior the suppressor learned from CT, or from the inductive bias of the network that reads the
+extra images; a network that reads three images also spends three times the encoder computation. The study separates these sources with a
+control of the same capacity, and it analyses the effect per finding group, because suppression could help focal lesions behind ribs while
+removing cues for diffuse or pleural findings.
+
+\subsubsection{Input configurations and network}
+Five configurations were trained with identical settings (Figs.~\ref{fig:architecture}b and~\ref{fig:cls_design}):
+\emph{orig} ($X$), \emph{soft} ($S$), \emph{early} ($X$, $S$ and $\hat B$ as the three input channels of one stream), \emph{hybrid} (three
+streams $X$, $S$, $\hat B$) and \emph{ctrl} (the hybrid network with $X$ in all three streams). The soft-tissue image comes from our
+suppressor ensemble run at its input size of 512\,px; classifiers see all images at $256\times256$\,px. One DenseNet-121 encoder $E$
+\cite{huang2017densenet} with shared weights, pretrained on ImageNet \cite{deng2009imagenet,wightman2019timm}, processes each stream $u_s$.
+Each stream is standardised per image and passed through its own learned affine map, because the bone image spans a narrow intensity range;
+the $8\times8$ encoder output is projected to $D=256$-dimensional tokens with a stream embedding $e_s$ and a two-dimensional sine position
+code $\pi_n$:
+\begin{equation}
+\begin{gathered}
+\tilde u_s=\gamma_s\,\frac{u_s-\mathrm{mean}(u_s)}{\mathrm{sd}(u_s)}+\beta_s,\\
+z_{s,n}=W\,E(\tilde u_s)_n+e_s+\pi_n\in\mathbb{R}^{D}.
+\end{gathered}
+\label{eq:tokens}
+\end{equation}
+A two-layer decoder with eight heads and one learned query $q_c$ per class attends to the tokens of all streams, as in query-based
+multi-label heads \cite{liu2021query2label,ridnik2023mldecoder}, and a linear map per class gives the logit $\ell_c$ from the decoder
+output $o_c$. With keys $k_{s,n}$, the head-averaged cross-attention of the last layer defines the routing of class $c$ to stream $s$:
+\begin{equation}
+\begin{gathered}
+a_{c,(s,n)}=\operatorname*{softmax}_{(s,n)}\Big(\frac{q_c^{\top}k_{s,n}}{\sqrt{D}}\Big),\\
+\rho_{c,s}=\sum_{n}a_{c,(s,n)},\qquad
+\ell_c=w_c^{\top}o_c+b_c.
+\end{gathered}
+\label{eq:routing}
+\end{equation}
+Single-stream configurations use the same encoder and decoder over 64 tokens. The shared encoder gives the hybrid the parameters of a
+single-stream model plus the decoder, at three times the encoder computation; \emph{ctrl} has exactly the hybrid's parameters and
+computation but no suppression.
+
+\begin{figure*}[!t]
+\centering
+\safefig[0.95\textwidth]{figures/fig_study_design.pdf}
+\caption{Classifier study design. (a) The three inputs for an NIH ChestX-ray14 test image: the radiograph $X$, the soft-tissue image $S$
+predicted by the suppressor and the bone image $\hat B=X-S$ (box: expert annotation of a focal finding). (b) The five configurations, all
+with the same DenseNet-121 encoder, class-query decoder and training settings. In the hybrid and the control one encoder with shared
+weights processes each stream and the decoder attends to the tokens of all three; the control receives $X$ three times. Bottom: the
+pre-specified contrasts.}
+\label{fig:cls_design}
+\end{figure*}
+
+\subsubsection{Training}
+The loss is the binary cross-entropy over the annotated labels $\mathcal{V}$ of a batch (one-hot targets for the three BDCXR-3257 classes):
+\begin{equation}
+\mathcal{L}_{\mathrm{cls}}=-\frac{1}{|\mathcal{V}|}\sum_{(i,c)\in\mathcal{V}}\Big[y_{ic}\log\sigma(\ell_{ic})+(1-y_{ic})\log\big(1-\sigma(\ell_{ic})\big)\Big].
+\label{eq:bce}
+\end{equation}
+Training used AdamW \cite{loshchilov2019adamw} (learning rate $3\times10^{-4}$, weight decay $10^{-4}$), batch size 32, 20 epochs with a
+cosine schedule after 200 warm-up steps, and mixed precision. Augmentation: random rotation by up to $7^\circ$, scaling by 0.9--1.1,
+translation by up to 3\,\% of the image size, and brightness and contrast changes, identical across the channels of an image. The epoch with
+the best validation macro-AUROC was kept. Every configuration was trained with seeds 0--4 on NIH ChestX-ray14 and VinBigData and with seeds
+0--4 in each of the five BDCXR-3257 folds of Section~\ref{sec:m-bdcxr}, giving 175 runs. A configuration's prediction is the seed ensemble
+\begin{equation}
+\bar p_c(x)=\frac15\sum_{k=0}^{4}\sigma\big(\ell^{(k)}_c(x)\big),
+\label{eq:seedens}
+\end{equation}
+and all tests compare seed ensembles. Runs used Kaggle T4 GPUs; a run longer than one session resumed from an end-of-epoch checkpoint, which
+gave the same predictions as uninterrupted training in a test.
+
+\subsubsection{Encoder selection}
+The plan screened four encoders on the NIH validation split (configuration \emph{orig}, seed 0, 10 epochs): DenseNet-121, ConvNeXt-V2-T
+\cite{woo2023convnextv2}, RAD-DINO \cite{perezgarcia2025raddino} and Swin-V2-B \cite{liu2022swinv2}. The best encoder would go forward with
+DenseNet-121, and an encoder within 0.005 of the best would yield to a cheaper one. All four reached validation macro-AUROC between 0.8384
+and 0.8430, and DenseNet-121 was the cheapest, so it went forward alone. ConvNeXt-V2-T failed to train at the plan's learning rate;
+following the rule of the suppressor study, the three encoders without batch normalisation were screened again with the encoder learning
+rate reduced fourfold, a deviation decided before the other screen results were seen (Supplementary Section~S1).
+
+\subsubsection{Finding groups}
+Before any run, the classes were grouped as \emph{focal} (NIH: nodule, mass; VinBigData: nodule/mass), \emph{diffuse} (effusion,
+infiltration, consolidation, oedema, pneumonia; VinBigData: pleural effusion, infiltration, consolidation, lung opacity, interstitial lung
+disease) and \emph{boundary} (cardiomegaly, atelectasis, pneumothorax, pleural thickening, emphysema, fibrosis, hernia; VinBigData:
+cardiomegaly, atelectasis, pneumothorax, pleural thickening, aortic enlargement, pulmonary fibrosis, calcification). VinBigData's ``other
+lesion'' belongs to no group, and BDCXR-3257 (normal, bacterial or viral pneumonia) enters only the overall tests. For a group $G$ of classes
+and two configurations $m$ and $m'$,
+\begin{equation}
+\begin{gathered}
+\mathrm{AUROC}_{\mathrm{macro}}(m)=\frac1C\sum_{c=1}^{C}\mathrm{AUROC}_c(m),\\
+\Delta_G(m,m')=\frac{1}{|G|}\sum_{c\in G}\big(\mathrm{AUROC}_c(m)-\mathrm{AUROC}_c(m')\big).
+\end{gathered}
+\label{eq:group}
+\end{equation}
+
+% ---------------------------------------------------------------------------------------------------------------------
+\subsection{Study~III: Cross-Modality Knowledge Transfer from a 2.5D CT Teacher}
+\label{sec:m-study3}
+Studies~I and~II used CT only to render training images. Study~III asks whether CT can teach a radiograph classifier directly: a CT
+classifier is distilled \cite{hinton2015distilling} into X-ray models on projections of the same volumes \cite{angaitkar2026anatomy}, and one
+transformer family serves both modalities so that their heat maps can be compared in the same patient. Five hypotheses were fixed in a
+fourth analysis plan, hash-frozen on 8 November 2026 before any model of this study was trained. Fig.~\ref{fig:xm_design} shows how the
+data, the models and the evaluations of this study connect.
+
+\begin{figure*}[!t]
+\centering
+\safefig[0.95\textwidth]{figures/fig_v4_design.pdf}
+\caption{Study~III design. Data (left): the CT-RATE subset (\num{2156} volumes), the Qure.ai projections of CT-RATE volumes with six
+shared findings (\num{1600} paired with the subset) and NIH ChestX-ray14 (14 diseases, 984 expert boxes), with VinBigData for zero-shot
+transfer. Models (middle; SwinV2-T, five seeds each): the 2.5D CT teacher (24 slices in three Hounsfield windows), the projection models
+$P_0$ and $P_1$ ($P_1$ distilled from the teacher's logits and pooled features) and the NIH classifiers $F_{\mathrm{in}}$,
+$F_{\mathrm{p0}}$ and $F_{\mathrm{p1}}$, with DenseNet-121 as the convolutional reference. Evaluation (right): CT test AUROC and CT versus
+X-ray heat maps (H14); projection test AUROC and zero-shot transfer; the NIH test split for H11--H13, the hallucination tests (H15), the
+pointing game and the conformal false-negative rate.}
+\label{fig:xm_design}
+\end{figure*}
+
+\subsubsection{Shared findings}
+Six findings are shared between CT-RATE and the radiograph sets: lung opacity, pleural effusion, atelectasis, cardiomegaly, consolidation
+and lung lesion. Each CT volume was reduced in the cloud environment to 24 axial slices over the lung extent with three Hounsfield windows
+as channels (lung, mediastinum, bone), cropped to the body at 256\,px. NIH ChestX-ray14 and VinBigData are used with the splits of
+Study~II. Pleural effusion, atelectasis, cardiomegaly and consolidation map to the classes of the same name and lung lesion to NIH Mass or
+Nodule (VinBigData Nodule/Mass); these five are the exactly mapped shared findings. Lung opacity maps only approximately to NIH Infiltration
+and is reported but not tested.
+
+\subsubsection{Models and training}
+All models use SwinV2-T (\texttt{swinv2\_tiny\_window8\_256}, ImageNet-1k weights \cite{liu2022swinv2,wightman2019timm}) with the
+class-query decoder of Study~II, a learning rate of $3\times10^{-4}$ with the encoder at a quarter of it, model selection on the validation
+split and five seeds per model (Fig.~\ref{fig:architecture}c). The \emph{CT teacher} is a 2.5D network: the encoder processes each of the
+24 slices with the three windows as colour channels, each slice yields $8\times8$ tokens with a two-dimensional sine code and a learned
+slice-depth embedding, and the decoder attends over the tokens of all slices (20 epochs, four volumes per step); a volumetric Swin network
+did not fit a T4 GPU at a useful batch size. The \emph{projection model} $P_0$ learns the six findings from the projections (15 epochs,
+batch 32); $P_1$ adds, on the \num{1600} training projections whose volume is in the CT subset, a distillation and an alignment term. For a
+paired projection $k$ with student logits $z_k$, teacher logits $t_k$ and pooled decoder outputs $e_k$ (student) and $e^{\mathrm{T}}_k$
+(teacher),
+\begin{equation}
+\begin{split}
+\mathcal{L}={}&\mathcal{L}_{\mathrm{BCE}}(z,y)+\lambda_{\mathrm{kd}}\,T^{2}\,\mathcal{L}_{\mathrm{BCE}}\!\big(z_k/T,\,\sigma(t_k/T)\big)\\
+&+\lambda_{\mathrm{al}}\big(1-\cos(We_k,\,e^{\mathrm{T}}_k)\big),
+\end{split}
+\label{eq:kd}
+\end{equation}
+with $y$ the six finding labels, $\mathcal{L}_{\mathrm{BCE}}$ the binary cross-entropy averaged over findings, $\sigma$ the logistic
+function, $T=2$, $\lambda_{\mathrm{kd}}=1$, $\lambda_{\mathrm{al}}=0.5$ and $W$ a learned linear map; half of every $P_1$ batch is drawn
+from the paired rows, and $P_1$ seed $k$ distils from the teacher of slot $k$. The \emph{radiograph classifiers} $F_{\mathrm{in}}$,
+$F_{\mathrm{p0}}$ and $F_{\mathrm{p1}}$ start from ImageNet, $P_0$ and $P_1$ (encoder and decoder loaded, heads re-initialised) and are
+trained on the 14 NIH diseases for 10 epochs with the radiograph as the only input. The five DenseNet-121 radiograph-only runs of Study~II
+are the convolutional reference (trained for 20 epochs at the full encoder learning rate, the pre-specified rule for batch-normalised
+encoders).
+
+\subsubsection{Seed-replacement rule}
+Teacher seed 2 did not learn (validation macro-AUROC 0.46--0.54 in every epoch, constant logits). Before any $P_1$ model of seed 2 was
+trained we fixed a rule: train seeds 5 and 6 with the unchanged recipe and give slot 2 to seed 5 unless its logits were constant (per-class
+standard deviation below 0.01), otherwise to seed 6. Seed 5 learned, so the teachers of slots 0--4 are seeds 0, 1, 5, 3 and 4
+(Supplementary Table~S1).
+
+% ---------------------------------------------------------------------------------------------------------------------
+\subsection{Statistical Analysis Plan, Explainability and Hallucination Protocols}
+\label{sec:m-stats}
+
+All three studies share one statistical framework, stated first below; the hypotheses of each study and the protocols for explanations,
+uncertainty and hallucination follow.
+
+\subsubsection{Analysis plans and general statistics}
+Each study was run under an analysis plan that was pre-specified and hash-frozen before the data it governs were evaluated, but not
+deposited in a public registry: SAP.md (v1 family), SAP\_v2.md (Study~I, frozen on 1~November 2026; \path{freeze_v2.json} holds the hashes
+of both plans, the SZCH development and held-out lists, the split files and the 52 weight files, at commit \texttt{dd52b6a}), the
+BDCXR-3257 addendum SAP\_bdcxr.md, the Study~II plan (hashed on 3 November 2026), SAP\_v4.md with DESIGN\_v4.md (Study~III, frozen in
+\path{freeze_v4.json} on 8 November 2026) and the exploratory site calibration SAP\_v5.md (frozen in \path{freeze_v5.json} on 17 November
+2026). Every later change is logged in DEVIATIONS.md; all primary and secondary results are reported
+whatever their direction.
+
+All comparisons are paired. Confidence intervals are percentile bootstrap intervals \cite{efron1993bootstrap} (\num{10000} resamples unless
+stated) over patients when several units come from one patient; paired differences are tested with the Wilcoxon signed-rank test
+\cite{wilcoxon1945individual}; AUCs are compared with the paired DeLong test \cite{delong1988auc}. Seeds are averaged within unit before
+testing and their spread is reported. Multiplicity is handled by the Holm procedure \cite{holm1979simple} within each family: with the $m$
+$p$-values of a family ordered as $p_{(1)}\le\dots\le p_{(m)}$,
+\begin{equation}
+\tilde p_{(j)}=\max_{i\le j}\,\min\big\{1,\,(m-i+1)\,p_{(i)}\big\}.
+\label{eq:holm}
+\end{equation}
+Confidence intervals are unadjusted 95\,\% intervals; effect sizes are always reported with them, and a hypothesis that fails is reported as
+failed. Non-inferiority uses the paired mean difference $\bar\Delta=\frac1n\sum_i(m_i^{\mathrm{ours}}-m_i^{\mathrm{ref}})$ and the
+one-sided 95\,\% lower bound $L_{95}$ of its image-level bootstrap distribution; it holds if
+\begin{equation}
+L_{95}(\bar\Delta)>-\delta
+\label{eq:ni}
+\end{equation}
+for a margin $\delta$ fixed in the plan.
+
+\subsubsection{Study~I hypotheses (H1$'$--H5$'$)}
+\begin{description}
+\item[H1$'$, dose-response.] On VinDr-RibCXR (245 images, six sites each, lesions from LIDC test CTs, $\alpha=1$), the per-site absorption
+ $A$ averaged over seeds falls with the twin weight. With $\bar A_{s,w}$ the absorption at site $s$ averaged over the seeds trained with
+ twin weight $w$, the slope $\beta_1$ of
+ \begin{equation}
+ \bar A_{s,w}=\beta_0+\beta_1\log_2(1+w)+e_{s,w}
+ \label{eq:dose}
+ \end{equation}
+ has an image-cluster bootstrap interval, and H1$'$ passes if its upper bound is below zero. The same analysis on the Qure-projection
+ test split (exact truth) is secondary.
+\item[H2$'$, fidelity.] On the 51 held-out SZCH pairs, bone-region PSNR of ours against the reference model is non-inferior
+ (Eq.~\eqref{eq:ni}) with margin $\delta=0.5$~dB; SSIM has a margin of 0.01 and is reported either way; ours against the no-twin control
+ uses a margin of 0.25~dB (the cost of the regulariser). Metrics are computed calibrated (primary) and raw (Eq.~\eqref{eq:psnrcal}).
+\item[H3$'$, lesion absorption.] On VinDr-RibCXR sites, $A$(ours)$<A$(reference model) and $A$(ours)$<A$(no-twin control), as paired
+ site-level differences with image-cluster bootstrap intervals, Holm over the two contrasts, and an interaction between sites that overlap
+ an annotated rib and sites that do not.
+\item[H4$'$, evidence without insertion.] (a) $\Delta$CNR of real nodules on JSRT and Node21 (Eq.~\eqref{eq:cnr}), ours against the
+ reference model and against the no-twin control, for all lesions and for lesions with at least 15\,\% bone overlap. (b) Downstream: NIH
+ ChestX-ray14 macro-AUROC per input (original, ours, reference model, CLAHE, original plus ours; three seeds); TBX11K, Node21 and
+ VinBigData detection by FROC and mAP@50; recall at two false positives per image for lesions with and without bone overlap, as a
+ difference in differences against the original input.
+\item[H5$'$, reliability.] Spearman correlation between ensemble spread and absolute bone error on the SZCH held-out pairs (pseudo-truth
+ bone from the least-squares-aligned DES image); split-conformal coverage calibrated on Qure-projection validation CTs and measured on the
+ Qure-projection test split (nominal 90\,\%) and, as measured under shift, on SZCH.
+\end{description}
+Site-level differences between models are paired, with image-cluster bootstrap intervals. Bootstrap intervals use \num{10000} resamples for
+mean absorption and contrasts, \num{2000} for the overlap interaction and 500 for the dose-response slope, always resampling whole images
+with replacement.
+
+\emph{Exploratory site calibration (SAP\_v5, Section~\ref{sec:m-sitecal}).} H16 (primary) is a gain in the bone-region
+PSNR$_{\mathrm{cal}}$ of ours from the calibration (one-sided 95\,\% lower bound of the paired difference above 0; image bootstrap,
+\num{10000} resamples) and H16b the same for whole-image PSNR$_{\mathrm{cal}}$. H17 is the non-inferiority of the calibrated ours to the
+calibrated reference model in bone-region PSNR$_{\mathrm{cal}}$ (margin 0.5\,dB, as H2$'$). H18 is a lower absorption of the calibrated ours
+than of the calibrated reference model on VinDr-RibCXR, from one audit run with all four models so that they share every site
+(image-cluster bootstrap, two-sided 95\,\% upper bound below 0). The rib benchmark of the calibrated models is descriptive. H16 is the only
+confirmatory test of this plan; the others are reported without multiplicity correction.
+
+\subsubsection{Study~II hypotheses (H6--H10)}
+The hypotheses continue the numbering of the suppressor plans; H9 concerns the suppressor's intervals (Section~\ref{sec:m-ensemble}).
+\begin{description}
+\item[H6 (primary).] The hybrid has a higher macro-AUROC than \emph{orig}; one test per dataset, Holm correction over the three.
+\item[H7 (secondary).] Hybrid against \emph{ctrl} (does a gain come from the suppression or from the extra computation?) and against
+ \emph{early} (do separate streams beat channel stacking?); one Holm family over the six tests.
+\item[H8 (secondary).] $\Delta_G$ of Eq.~\eqref{eq:group} for hybrid and for \emph{soft} against \emph{orig} in each finding group; Holm
+ within dataset over the six tests. Per class, hybrid against \emph{orig} and against \emph{early} with the paired DeLong test
+ \cite{delong1988auc}, Holm within dataset over classes and both contrasts.
+\item[H10 (secondary).] In the hybrid models, the pointing-game hit rate of the soft-tissue stream minus that of the radiograph stream is
+ larger for focal targets than for the other targets.
+\end{description}
+Every contrast $\Delta$ of two seed ensembles is resampled with a paired cluster bootstrap: replicate $b$ draws clusters with replacement
+(patients for NIH, images for VinBigData, near-duplicate groups for BDCXR-3257), recomputes $\Delta^{*}_b$ with the same resamples for every
+contrast of a dataset, and with $B=\num{10000}$ replicates gives the percentile interval $[\Delta^{*}_{(0.025)},\Delta^{*}_{(0.975)}]$ and
+\begin{equation}
+\begin{gathered}
+p=\min\big\{1,\;2\min(p_{-},p_{+})\big\},\\
+p_{-}=\frac{1+\#\{b:\Delta^{*}_b\le0\}}{B+1},\quad p_{+}=\frac{1+\#\{b:\Delta^{*}_b\ge0\}}{B+1}.
+\end{gathered}
+\label{eq:bootp}
+\end{equation}
+AUPRC differences are reported with bootstrap intervals only. The plan, the code and the split files were hashed on 3 November 2026, before
+the encoder screen and before any classifier of this study saw a test split.
+
+\subsubsection{Attribution maps and the pointing game}
+\label{sec:m-xai}
+For each hybrid model, Grad-CAM++ \cite{chattopadhay2018gradcampp} was computed per stream on the last encoder block. Integrated Gradients
+\cite{sundararajan2017axiomatic} was computed on the three inputs jointly against a blurred baseline ($\sigma=8$\,px, 32 steps), because a
+black image has no contrast after standardisation; the decoder attention was read from its last layer. A target $t$ is a pair of test image
+and box class; a map $M_m$ hits when its maximum lies inside a box of that class, with a tolerance of 15\,px at 256\,px fixed in advance
+\cite{zhang2018topdown}. With $h^{(k)}_m(t)\in\{0,1\}$ the hit of map $m$ of the seed-$k$ hybrid model, focal targets $\mathcal{F}$
+(masses and nodules) and the other targets $\mathcal{O}$ (six box classes),
+\begin{equation}
+\begin{gathered}
+d(t)=\frac15\sum_{k=0}^{4}\big(h^{(k)}_{S}(t)-h^{(k)}_{X}(t)\big),\\
+I=\frac{1}{|\mathcal{F}|}\sum_{t\in\mathcal{F}}d(t)-\frac{1}{|\mathcal{O}|}\sum_{t\in\mathcal{O}}d(t),
+\end{gathered}
+\label{eq:pointing}
+\end{equation}
+and H10 tests $I>0$ with an image-cluster bootstrap (\num{10000} resamples; Eq.~\eqref{eq:bootp}).
+
+\subsubsection{Classification uncertainty}
+\label{sec:m-clsuq}
+\emph{NIH: false-negative risk control.} An image's label set holds every class with ensemble probability at least $1-\lambda$; the threshold
+is calibrated on the validation split (\num{8634} images) by conformal risk control \cite{angelopoulos2022crc} and the false-negative rate is
+measured on the test split:
+\begin{equation}
+\begin{gathered}
+\mathcal{C}_\lambda(x)=\{c:\bar p_c(x)\ge1-\lambda\},\\
+\hat R_n(\lambda)=\frac1n\sum_{i=1}^{n}\Big(1-\frac{|\mathcal{C}_\lambda(x_i)\cap Y_i|}{|Y_i|}\Big),\\
+\hat\lambda=\min\Big\{\lambda:\frac{n\,\hat R_n(\lambda)+1}{n+1}\le\alpha\Big\},
+\end{gathered}
+\label{eq:crc}
+\end{equation}
+over the $n$ calibration images with at least one positive label $Y_i$, at $\alpha=0.10$.
+
+\emph{BDCXR-3257: class-conditional sets.} With probabilities normalised to sum to one, $\hat p_y=\bar p_y/\sum_{y'}\bar p_{y'}$, the score
+$1-\hat p_y$ is calibrated separately for each true class \cite{vovk2005algorithmic}, on the other folds' out-of-fold predictions for each
+test fold:
+\begin{equation}
+\begin{gathered}
+\mathcal{C}(x)=\{y:1-\hat p_y(x)\le q_y\},\\
+q_y=\text{the }j_y\text{-th smallest of }\{1-\hat p_{y_i}(x_i):y_i=y\},\\
+j_y=\lceil (n_y+1)(1-\alpha)\rceil.
+\end{gathered}
+\label{eq:mondriansets}
+\end{equation}
+
+\emph{Selective classification.} Images are ranked by a confidence score and the most confident fraction is kept
+\cite{geifman2017selective,geifman2019bias}. Score A is one minus the entropy $H$ of the seed ensemble (mean binary entropy over the 14
+labels for NIH, Shannon entropy of the normalised probabilities for BDCXR-3257); score B adds the suppressor's own uncertainty,
+$-(z_H+z_\sigma)$, where $\sigma$ is the spread of Eq.~\eqref{eq:ensemble} averaged over the lung field and $z$ standardises over the
+evaluated images of a dataset. With the losses $\ell_{(1)},\dots,\ell_{(N)}$ sorted by decreasing confidence (Brier score for NIH, top-1
+error for BDCXR-3257),
+\begin{equation}
+\mathrm{AURC}=\frac1N\sum_{k=1}^{N}\frac1k\sum_{j=1}^{k}\ell_{(j)}.
+\label{eq:aurc}
+\end{equation}
+
+\subsubsection{Study~III: cross-modal agreement and hallucination tests}
+\label{sec:m-xmxai}
+For the radiograph classifiers we computed Grad-CAM++ on the last encoder stage \cite{chattopadhay2018gradcampp}, Integrated Gradients
+\cite{sundararajan2017axiomatic} and the attention of the last decoder layer, scored with the pointing game on the 984 NIH expert boxes
+\cite{zhang2018topdown} at the 15\,px tolerance of Study~II. For each CT test scan positive for a finding, the teacher's slice-wise
+Grad-CAM++ maps were stacked and summed along the anteroposterior axis, giving a frontal map in the geometry of the paired projection. CT and
+X-ray maps were cropped to their own lung boxes, resized to $32\times32$, scaled to sum to one and averaged over the five seed pairs.
+Agreement is the Pearson correlation of the matched maps, and the null correlates the CT map with the X-ray maps of the other scans positive
+for the same finding. A pre-specified orientation check on the attenuation frames alone (correlation 0.472 as they were, 0.435 mirrored)
+left the maps unmirrored.
+
+We call a report of a finding that the image does not contain a hallucination. On the \num{9861} NIH test images without any finding, with
+seed-mean probabilities and per-class thresholds at 90\,\% specificity on the validation split, the hallucination rate is the share of
+images in which some class moves from at most to above its threshold after a perturbation that adds no disease: rib emphasis (the
+radiograph plus half of the bone image of the Study~I suppressor), Gaussian noise ($\sigma=0.02$) or a gamma of 0.8. Counterfactual nodules
+from the audit library (Section~\ref{sec:m-audit}) were pasted into lung fields of images whose Mass and Nodule scores were at most their
+thresholds; sensitivity is the share in which either score crosses it. Off-target attribution is the share of Grad-CAM++ mass outside the
+lung fields for positive predictions of lung findings.
+
+\subsubsection{Study~III hypotheses (H11--H15)}
+A model's prediction is the mean of its seeds' probabilities. H11 (primary) compares $F_{\mathrm{p1}}$ with $F_{\mathrm{in}}$ in the mean
+NIH test AUROC of the five shared findings; H12 compares $F_{\mathrm{p1}}$ with $F_{\mathrm{p0}}$ and $F_{\mathrm{p0}}$ with
+$F_{\mathrm{in}}$; H13 compares $F_{\mathrm{in}}$ with DenseNet-121 in the 14-disease macro-AUROC. That reference had been evaluated on the
+NIH test split in Study~II about ten hours before this plan was frozen, so its score was known when H13 was specified (no Swin model existed
+yet). These contrasts use a paired patient-cluster bootstrap (\num{10000} resamples, two-sided percentile $p$-values, Eq.~\eqref{eq:bootp});
+H11 and the two H12 contrasts form one Holm family. H14 is the mean per-map difference between matched and mismatched correlation
+(scan-cluster bootstrap) and H15 the mean per-image difference in the rib-emphasis flip between $F_{\mathrm{p1}}$ and $F_{\mathrm{in}}$
+(patient-cluster bootstrap). The CT teacher, the projection models and their zero-shot transfer, per-class DeLong tests
+\cite{delong1988auc}, conformal risk control of the false-negative rate at 0.10 \cite{angelopoulos2022crc} and the pointing game are
+descriptive; the grouping of the DeLong tests and the pointing-game summary were fixed after the hypothesis results were known.

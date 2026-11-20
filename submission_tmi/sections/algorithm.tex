@@ -1,0 +1,28 @@
+\begin{algorithm}[!t]
+\caption{Training, counterfactual audit and downstream evaluation}
+\label{alg:pipeline}
+\footnotesize
+\begin{algorithmic}[1]
+\REQUIRE Qure.ai projections $\mathcal{D}_{\mathrm{qp}}$ with exact $(X,B)$ (Eq.~\eqref{eq:qure}); lesion libraries
+ $\mathcal{L}_{\mathrm{train}}$, $\mathcal{L}_{\mathrm{test}}$ from LIDC-IDRI training and test CTs; real test sets
+\ENSURE Suppressor ensemble $\bar f$ with intervals $\mathcal{C}_p$; downstream and fusion classifiers; all estimates with 95\,\% intervals
+\FOR[\textit{Study~I}]{seed $k\in\{0,1,2\}$}
+ \FOR{step $=1$ \TO \num{37500}}
+  \STATE Compose a batch: re-weight $B$, shared affine, insertion, tone curve $\gamma$, $B'=X'-S'$ (Eq.~\eqref{eq:tone})
+  \STATE Build twins $x^{+}=\min(x+n,1)$, $n$ from $\mathcal{L}_{\mathrm{train}}$, for half of the batch
+  \STATE Update $f_k$ with AdamW on $\mathcal{L}$ of Eq.~\eqref{eq:twin}; update EMA weights
+ \ENDFOR
+\ENDFOR
+\STATE $\bar f,\sigma\gets$ Eq.~\eqref{eq:ensemble}; calibrate $q$ on Qure.ai validation pixels (Eq.~\eqref{eq:conformal})
+\FOR[\textit{audit}]{each real test image $x$}
+ \STATE Draw six lung sites with a fixed seed and lesions from $\mathcal{L}_{\mathrm{test}}$
+ \STATE For every model, compute $A$ (Eq.~\eqref{eq:absorption}) and bone overlap from independent masks
+\ENDFOR
+\STATE Score fidelity, rib benchmark, $\Delta$CNR, detection and classification; test H1$'$--H5$'$ and E1--E3
+\FOR[\textit{Study~II}]{config $\in\{$orig, soft, early, hybrid, ctrl$\}$, data set, fold, seed $0..4$}
+ \STATE Train the class-query classifier on the $(X,S,\hat B)$ streams (Eqs.~\eqref{eq:tokens}--\eqref{eq:bce})
+\ENDFOR
+\STATE Seed ensembles (Eq.~\eqref{eq:seedens}); cluster-bootstrap contrasts with Holm; test H6--H10; pointing game, conformal sets, AURC
+\RETURN all estimates with 95\,\% intervals, whatever their direction
+\end{algorithmic}
+\end{algorithm}

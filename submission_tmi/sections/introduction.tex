@@ -1,0 +1,58 @@
+\section{Introduction}
+\label{sec:intro}
+\IEEEPARstart{R}{ibs} and clavicles overlap the lung fields on a chest radiograph and can hide small lesions. Dual-energy subtraction
+(DES) separates bone from soft tissue, but it needs dedicated hardware and a second exposure \cite{kuhlman2006des,sun2026bsldm}.
+Software bone suppression avoids both: radiologists find more nodules with suppressed images \cite{freedman2011lung}, and suppressed
+images have been compared with computer-aided detection \cite{schalekamp2014cad} and used as classifier inputs
+\cite{rajaraman2021bone}. Learning-based suppressors need paired supervision. It can come from real DES pairs
+\cite{chen2024bsdiff,sun2026bsldm,sun2025gllcm,sun2026debonedit}, which are scarce, or from chest CT, whose bone and soft-tissue
+components can be projected separately and are therefore known exactly \cite{angaitkar2026anatomy}. Public projections of CT-RATE
+volumes \cite{hamamci2026ctrate} make the second route practical.
+
+A suppressor judged by image fidelity can nevertheless erase lesions. A network rewarded for predicting bone can move lesion signal into
+the bone image, so that the lesion disappears from the suppressed radiograph, and PSNR or SSIM computed over the whole image are dominated
+by normal anatomy. Because a model that does nothing never absorbs a lesion, absorption has to be read next to suppression strength.
+Simulated nodules have been used to measure contrast after hand-built clavicle suppression and in phantoms
+\cite{hogeweg2013suppression,takagi2020dose}, and learned image-to-image models are known to remove or invent content in other
+modalities \cite{cohen2018distribution,antun2020instabilities,bhadra2021hallucinations,tivnan2024hallucination}. In our search (PubMed,
+arXiv and Crossref) we found no audit of learned bone suppression against an exactly known, additive lesion signal, and no training
+objective aimed at it.
+
+Whether suppression helps prediction is a separate question. The suppressed images are computed from the radiograph and add no
+information that a classifier could not extract itself, so a gain must come from the prior that the suppressor learned from CT or from the
+way a network uses the extra images. A network that reads three images spends three times the computation, so a gain can be credited to
+suppression only against a control of the same capacity, and seed variation and analytic flexibility can easily produce spurious
+differences \cite{varoquaux2022failures,simmons2011falsepositive}. Every comparison here is therefore paired, repeated over seeds and
+fixed in advance.
+
+We ask whether CT-supervised bone suppression can preserve pulmonary lesions and improve nodule detection, focal disease classification
+and localisation. Our contributions are:
+\begin{itemize}
+\item A counterfactual lesion audit that measures the fraction $A$ of an exactly known, additive lesion signal moved into the bone image,
+ at sites shared by all models and reported beside suppression strength.
+\item A twin lesion-invariance regulariser, trained on public CT projections in a three-model ensemble. On VinDr-RibCXR the ensemble
+ absorbed 0.051 of an added lesion, against 0.149 for a released CT-supervised model and 0.178 for a matched control, at non-inferior
+ bone-region PSNR (21.46 vs.\ 21.51\,dB). The effect replicated across three encoders, on JSRT and on paediatric radiographs
+ ($A=0.084$ vs.\ 0.217 and 0.251).
+\item Evidence that suppressed images help prediction when added as extra input channels: Node21 detection (CPM $+0.028$,
+ 95\,\% CI 0.009--0.047), VinBigData detection ($+0.008$, 0.002--0.014) and NIH macro-AUROC ($+0.006$, 0.003--0.008), whereas the
+ soft-tissue image alone gave no gain.
+\item A fusion ablation of five input configurations (175 runs, three data sets, a capacity-matched control). A three-stream network gave
+ no overall gain; the benefit was concentrated in focal findings (NIH soft-tissue focal AUROC $+0.0089$, Holm $p=0.0024$; nodule
+ $+0.0129$, Holm $p=0.00121$) and in the localisation of focal lesions (pointing-game interaction $+0.145$, $p=0.0002$), at a cost for
+ diffuse findings.
+\item Deployment analyses: ensemble uncertainty that needs recalibration on real radiographs, a paediatric external validation and an
+ exploratory site calibration of the fidelity metric ($+2.12$\,dB in the bone region without raising lesion absorption).
+\end{itemize}
+Fig.~\ref{fig:workflow} summarises the two studies. Section~\ref{sec:related} reviews related work, Section~\ref{sec:methods} describes
+the data, the audit, the suppressors and the downstream studies, Section~\ref{sec:results} reports the results, and
+Section~\ref{sec:discussion} discusses them together with their limitations.
+
+\begin{figure*}[!t]
+\centering
+\safefig[0.9\textwidth]{figures/fig_tmi_workflow.pdf}
+\caption{Overview. Study~I trains CT-supervised bone suppressors with a twin lesion-invariance regulariser, audits their lesion absorption
+and tests the suppressed images on detection and classification; Study~II compares five input configurations of a multi-stream
+classifier, including a capacity-matched control.}
+\label{fig:workflow}
+\end{figure*}

@@ -1,0 +1,4 @@
+ens: n=1470 A_mean=0.051 low-overlap=0.050 high-overlap=0.059 leak=0.0010
+ours_cal: n=1470 A_mean=0.036 low-overlap=0.032 high-overlap=0.049 leak=0.0009
+qure: n=1470 A_mean=0.149 low-overlap=0.141 high-overlap=0.198 leak=0.0005
+qure_cal: n=1470 A_mean=0.132 low-overlap=0.122 high-overlap=0.183 leak=0.0004

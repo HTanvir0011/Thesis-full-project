@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this code, these results or the trained bone suppressor, please cite them as below."
+type: software
+title: "Explainable and hallucination-aware cross-modality learning from chest CT for chest X-ray analysis: code, analysis plans, results and trained bone suppressor"
+version: 1.0.0
+date-released: 2026-11-20
+abstract: "Code, analysis plans, results, trained bone suppressor, manuscripts and thesis of three studies of CT-supervised models of chest radiographs: a counterfactual lesion audit and a twin lesion-invariance regulariser for bone suppression, with the effect of the suppressed images on detection and classification; a capacity-controlled test of bone-suppressed inputs to multi-stream classifiers; and distillation of a 2.5D Swin CT teacher into Swin radiograph classifiers with heat-map, localisation and hallucination tests. Code under MIT; the three checkpoints of the bone-suppressor ensemble (release v1.0.0) under CC BY-NC-SA 4.0."
+authors:
+  - family-names: Hossin
+    given-names: Tanvir
+    affiliation: "Daffodil International University, Dhaka, Bangladesh"
+repository-code: "https://github.com/HTanvir0011/Thesis-full-project"
+url: "https://github.com/HTanvir0011/Thesis-full-project/releases/tag/v1.0.0"
+license: MIT
+keywords:
+  - chest radiography
+  - bone suppression
+  - counterfactual evaluation
+  - lesion fidelity
+  - nodule detection
+  - knowledge distillation
+  - Swin transformer
+  - explainability
+  - uncertainty quantification

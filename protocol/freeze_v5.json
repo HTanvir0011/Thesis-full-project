@@ -1,0 +1,18 @@
+{
+ "created": "2026-11-17T01:31:57",
+ "git_commit": "e43c59a3c7792830728bc9914ec43bbae90a1c13",
+ "files": {
+  "protocol/SAP_v5.md": "d9edc474482a6dd291eb5aafec500c083af117be675a39f38714d93d3dcc032b",
+  "s4/site_cal.py": "5ef0ae3cf4d0abbf7ebd11d5131d3974edebf37742ecef1521da3cc0d90ccdc1",
+  "s4/eval_real.py": "01cf8bea0a326e300b81729f4568f6a25c9e9034f4097e26ad2884400e6abc4f",
+  "s4/audit_real.py": "cd6ea6f045376099ed955e55dc21ba74e864946fb7fbd0a8a8b97aef3fcfb7d6",
+  "s4/eval_ribcxr.py": "cbdd5070c3aba86bc602caaa3df7e4b22f9f4e81fa774057054eb270045011b2",
+  "s4/stats.py": "74090a202d4e5e79b76c692f74c02753fffbd2615f0f6de8b052affc6fcaba27",
+  "tools/szch_site_cal.py": "fa93d5dd85c7e12d0e6d6daa5f84dcad32ada700e126795a9058aaf4339f8428",
+  "tools/szch_dev_diag.py": "84f0183e97cde079136c98846dd237555d768866a14750319113b68bcaa4ab9e",
+  "tests/test_site_cal.py": "ad12ec676fa9d50e10bec024f43bd7e95f1f89cf94b1cbc624d8f2d70957801e",
+  "results/site_cal_coef.json": "9b62f092c5a6de461c01498efdc726675c2add6a732e42c455249835d750ccea",
+  "outputs/lesions_test.npz": "84142f6aa2c113e24946e51cd4612a93a77ae263e0bebb5dab706ffb9dea9fc6"
+ },
+ "primary": "H16: on the 51 held-out SZCH pairs the site correction fitted on the 24 development pairs raises the bone-region PSNR_cal of ours; image bootstrap, 10,000 resamples; one-sided 95 % lower bound of the paired difference > 0"
+}

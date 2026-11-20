@@ -1,0 +1,245 @@
+% =====================================================================================================================
+% Supplementary material of the IEEE paper (compile on its own: Overleaf Menu > Main document = supplementary.tex, pdfLaTeX).
+% Floats are numbered in source order: Tables S1-S8 and Figures S1-S5 are cited by number in main.tex, so keep their order.
+% =====================================================================================================================
+\documentclass[journal]{IEEEtran}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{url}
+\usepackage{xcolor}
+\usepackage{siunitx}
+\usepackage{adjustbox}
+\usepackage[hidelinks]{hyperref}
+
+\setlength{\emergencystretch}{2em}
+\renewcommand{\topfraction}{0.9}\renewcommand{\dbltopfraction}{0.9}\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.7}\renewcommand{\dblfloatpagefraction}{0.7}
+\setcounter{topnumber}{4}\setcounter{dbltopnumber}{4}\setcounter{totalnumber}{6}
+\renewcommand{\thesection}{S\arabic{section}}
+\renewcommand{\thesubsection}{S\arabic{section}.\arabic{subsection}}
+\renewcommand{\thetable}{S\arabic{table}}
+\renewcommand{\thefigure}{S\arabic{figure}}
+
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+\newcommand{\safefig}[2][\linewidth]{%
+  \IfFileExists{#2}%
+    {\includegraphics[width=#1]{#2}}%
+    {\fbox{\parbox[c][2.4cm][c]{0.92\linewidth}{\centering\todo{missing figure #2}}}}}
+\newcommand{\restable}[2][\columnwidth]{\begin{adjustbox}{max width=#1}\footnotesize\input{tables/#2.tex}\end{adjustbox}}
+
+\begin{document}
+\begin{center}
+{\Large\bfseries Supplementary Material}\\[0.5em]
+{\large Lesion-Faithful Bone Suppression from Chest CT Projections: Counterfactual Auditing and Gains for Focal Lesion Detection and
+Classification in Chest Radiographs}
+\end{center}
+\medskip
+
+This document gives the analysis notes and the secondary tables and figures of the paper. Tables and figures of the main paper are cited
+there as ``Table~I'' and ``Fig.~1'', those of this document as ``Table~S1'' and ``Fig.~S1''.
+
+% =====================================================================================================================
+\section{Analysis Notes and Corrections}
+\label{sup:notes}
+This section records, in one place, every change to the analysis that was made after it started, with its reason. None changed the
+verdict of a hypothesis.
+
+\subsection{Study I}
+\begin{itemize}
+\item \emph{Choice of encoder.} A replacement rule declared before the final runs moved ConvNeXt-V2-T into the place of the planned
+ SwinV2-T. At two seeds (development data) RAD-DINO reached $A=0.046$ and bone-region PSNR$_{\mathrm{cal}}$ 21.92\,dB and
+ ConvNeXt-V2-T $A=0.050$ and 22.01\,dB; both met the rule, and the tie-break declared in advance (mean absorption within 0.005, then the
+ higher bone-region PSNR) chose ConvNeXt-V2-T, the only encoder that also passed the screening rule (Table~\ref{stab:screen}), so excluding
+ RAD-DINO would not have changed the choice. With the third seeds the absorption gap is 0.0055, just outside the band; the choice was not
+ reopened and both encoders are reported in the main paper.
+\item \emph{Encoder learning rate.} ConvNeXt-V2-T diverged at the full learning rate (fp16 overflow) and was rerun with an encoder learning
+ rate $0.25\times$ that of the decoder, an extension of the rule written for vision transformers.
+\item \emph{Development use of SZCH.} After the v1 ablation the SZCH pairs were looked at, so SZCH became a development set for decisions
+ about the final recipe. While the recipe was being chosen, screening tools printed held-out PSNR and SSIM next to the development
+ numbers for earlier models and screening runs; no rule, table or decision used them, and the tool was changed to print development
+ numbers only.
+\item \emph{JSRT overlap map.} JSRT has no bone reference. The protocol named the consensus of the bone maps of ours and of the reference
+ model, but the audit took the overlap from the reference model's bone map alone (a secondary analysis).
+\item \emph{BDCXR-3257 duplicate grouping.} After the protocol of the external validation was fixed, near-duplicate images were grouped
+ by their correlation at 64\,px ($r\ge0.93$, 48 pairs) so that no group spans two folds; this was decided from the images alone before
+ any model ran.
+\item \emph{Corrections found in an independent check.} After the first evaluation of the locked sets, an independent check of the
+ statistics code found a resampling error that had narrowed interaction intervals and detection metrics that depended on the order of tied
+ scores by up to 0.00055; both were corrected and all analyses rerun. Outputs from cloud and local GPUs differ by at most 0.0024\,dB.
+\item \emph{Execution.} Some evaluations ran on cloud GPUs instead of the local GPU with identical code; the lung masks were exported once
+ so that every model is audited at the same sites.
+\end{itemize}
+
+\subsection{Study II}
+\begin{itemize}
+\item \emph{Gradient accumulation.} SwinV2-B did not fit a 16\,GB GPU at batch size 32 and was screened with four micro-batches per step
+ (the same effective batch). The other encoders ran unchanged.
+\item \emph{Encoder learning rate in the screen.} ConvNeXt-V2-T stayed at chance at the planned learning rate. The three encoders
+ without batch normalisation were screened again with the encoder learning rate reduced fourfold, decided before the other screen results
+ were seen, on validation data only.
+\item \emph{Holm families.} Before any test evaluation we fixed how H6 and H7 would be corrected if two encoders went forward, and which
+ models H10 uses. With one encoder the families are those of the main paper.
+\item \emph{Repeated NIH runs.} One account's NIH soft-tissue array differed at the byte level from the other five copies. The five runs
+ trained on it (soft seeds 0, 3, 4; early seeds 2, 3) were repeated on a consistent copy before the analysis. With the superseded runs,
+ the early and soft seed ensembles would have scored 0.8279 and 0.8253 instead of 0.8273 and 0.8243; this check entered no test.
+\item \emph{Early fusion.} The contrast between early fusion and the radiograph alone (0.8273 against 0.8241 on NIH) was not one of the
+ tested hypotheses and is descriptive.
+\end{itemize}
+
+% =====================================================================================================================
+\section{Additional Tables}
+\label{sup:tables}
+Tables~\ref{stab:szch}--\ref{stab:rib} give every method and seed of the main fidelity, audit and rib-benchmark tables,
+Table~\ref{stab:seeds} the single seeds of the final models, Table~\ref{stab:qp} the exact-truth audit on the Qure.ai test split,
+Table~\ref{stab:amplitude} the amplitude sweep of the audit, Table~\ref{stab:screen} the encoder screen and Table~\ref{stab:v1} the v1
+hypothesis H1, Table~\ref{stab:per_class} the per-class AUROC of the fusion study and Table~\ref{stab:cls_uq} the uncertainty of the
+classifiers.
+
+\begin{table*}[!t]
+\centering
+\caption{Held-out SZCH-X-Rays pairs (51): bone-region and whole-image metrics for every method and seed, calibrated (primary) and raw.
+HF ratio: high-frequency energy of the non-bone region relative to the dual-energy soft-tissue image (1 = equal).}
+\label{stab:szch}
+\restable[\textwidth]{tmi_s_szch}
+\end{table*}
+
+\begin{table}[!t]
+\centering
+\caption{Counterfactual lesion audit on VinDr-RibCXR: mean absorption of every method and seed with image-cluster bootstrap intervals
+(lower is better).}
+\label{stab:audit}
+\restable{tmi_s_audit_ribcxr}
+\end{table}
+
+\begin{table}[!t]
+\centering
+\caption{Rib benchmark on VinDr-RibCXR for every method (metrics only).}
+\label{stab:rib}
+\restable{tmi_s_rib}
+\end{table}
+
+\begin{table*}[!t]
+\centering
+\caption{Single-seed results of the final models. The ensembles average seeds 0 to 2; SwinV2-T seed 3 is the reserve.}
+\label{stab:seeds}
+\restable[\textwidth]{app_seeds}
+\end{table*}
+
+\begin{table*}[!t]
+\centering
+\caption{Exact-truth audit on the Qure.ai test split (430 projections; lesions added to the soft component): absorption, lesion contrast
+ratio of the soft estimate and bone MAE. The SwinV2-T twin row averages the four seeds of the dose-response arm ($K=4$); the other trained
+models use seeds 0--2.}
+\label{stab:qp}
+\restable[\textwidth]{app_qp_audit}
+\end{table*}
+
+\begin{table}[!t]
+\centering
+\caption{Audit amplitude sweep on the 450 SZCH sites (development data).}
+\label{stab:amplitude}
+\restable{app_amplitude}
+\end{table}
+
+\begin{table}[!t]
+\centering
+\caption{Encoder screen at \num{100000} samples, twin weight 16 (development data).}
+\label{stab:screen}
+\restable{app_encoder_screen}
+\end{table}
+
+\begin{table*}[!t]
+\centering
+\caption{v1 hypothesis H1 on synthetic LIDC-IDRI test CTs (exact truth; three seeds per arm): absorption of the insertion arms against the
+recipe arm and the non-inferiority of the bone MAE.}
+\label{stab:v1}
+\restable[\textwidth]{v1_h1}
+\end{table*}
+
+
+\begin{table*}[!t]
+\centering
+\caption{Fusion study, per class (H8): test AUROC of the radiograph and hybrid seed ensembles and the paired DeLong contrasts of the hybrid against the
+radiograph and against channel stacking; Holm within data set over classes and both contrasts.}
+\label{stab:per_class}
+\restable[\textwidth]{v3_per_class}
+\end{table*}
+
+\begin{table*}[!t]
+\centering
+\caption{Classification uncertainty. Top: conformal risk control of the false-negative rate on NIH (nominal 0.10) and class-conditional
+(Mondrian) sets on BDCXR-3257 (nominal coverage 0.90). Bottom: selective classification, area under the risk--coverage curve with the
+entropy of the seed ensemble alone and with the suppressor's spread added (lower is better).}
+\label{stab:cls_uq}
+\restable[\textwidth]{v3_conformal}
+\par\smallskip\noindent{\footnotesize\textit{Selective classification}}\par\smallskip
+\restable[\textwidth]{v3_selective}
+\end{table*}
+
+% =====================================================================================================================
+\section{Additional Figures}
+\label{sup:figures}
+Fig.~\ref{sfig:reliability} shows the per-image coverage of the bone-image intervals, Fig.~\ref{sfig:bone_unc} their recalibration, Fig.~\ref{sfig:seeds} every run of the fusion study,
+Figs.~\ref{sfig:conformal} and~\ref{sfig:selective} the classification uncertainty, Fig.~\ref{sfig:ig}
+Integrated-Gradients maps and Fig.~\ref{sfig:pointing} the pointing game per class.
+
+\begin{figure*}[!t]
+\centering
+\safefig[0.78\textwidth]{figures/reliability.pdf}
+\caption{Left: per-image coverage of the conformal intervals on the Qure.ai test split and on the held-out SZCH-X-Rays pairs (bars:
+means; dashed: nominal 0.90). Right: per-image Spearman correlation of ensemble spread and absolute error on SZCH-X-Rays (line: mean).}
+\label{sfig:reliability}
+\end{figure*}
+
+\begin{figure*}[!t]
+\centering
+\safefig[0.9\textwidth]{figures/fig_bone_uncertainty.pdf}
+\caption{Bone-image intervals on the 51 held-out SZCH-X-Rays pairs, recalibrated on the 24 development pairs (H9, post hoc): per-image
+coverage, reliability and sparsification.}
+\label{sfig:bone_unc}
+\end{figure*}
+
+\begin{figure*}[!t]
+\centering
+\safefig[0.8\textwidth]{figures/fig_seed_spread_densenet121.pdf}
+\caption{Fusion study: every single run next to the seed ensembles of each configuration.}
+\label{sfig:seeds}
+\end{figure*}
+
+\begin{figure*}[!t]
+\centering
+\safefig[0.8\textwidth]{figures/fig_conformal_sets_densenet121.pdf}
+\caption{Conformal sets per class (conformal risk control on NIH ChestX-ray14; Mondrian sets on BDCXR-3257).}
+\label{sfig:conformal}
+\end{figure*}
+
+\begin{figure*}[!t]
+\centering
+\safefig[0.8\textwidth]{figures/fig_selective_classification_densenet121.pdf}
+\caption{Selective classification: risk--coverage curves with the entropy of the seed ensemble alone and with the suppressor's spread
+added.}
+\label{sfig:selective}
+\end{figure*}
+
+\begin{figure*}[!t]
+\centering
+\safefig[0.9\textwidth]{figures/fig_xai_ig_densenet121.pdf}
+\caption{Integrated-Gradients maps of the hybrid model on NIH ChestX-ray14 test images, per input.}
+\label{sfig:ig}
+\end{figure*}
+
+\begin{figure*}[!t]
+\centering
+\safefig[0.95\textwidth]{figures/fig_pointing_game_densenet121.pdf}
+\caption{Pointing game per NIH box class and per group. (a) Hit rate of each map. (b) Decoder routing: share of each class query's
+attention on each stream. (c) Share of the Integrated-Gradients attribution per input. Brackets: number of targets.}
+\label{sfig:pointing}
+\end{figure*}
+
+\end{document}

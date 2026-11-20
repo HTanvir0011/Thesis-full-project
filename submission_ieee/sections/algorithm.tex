@@ -1,0 +1,34 @@
+\begin{algorithm}[!t]
+\caption{Training, counterfactual audit and cross-modality evaluation}
+\label{alg:pipeline}
+\footnotesize
+\begin{algorithmic}[1]
+\REQUIRE Qure.ai projections $\mathcal{D}_{\mathrm{qp}}$ with exact $(X,B)$ (Eq.~\eqref{eq:qure}); lesion libraries
+ $\mathcal{L}_{\mathrm{train}}$, $\mathcal{L}_{\mathrm{test}}$ from LIDC-IDRI; real test sets; CT-RATE subset $\mathcal{D}_{\mathrm{CT}}$
+\ENSURE Suppressor ensemble $\bar f$ with intervals $\mathcal{C}_p$; classifiers; test results of H1$'$--H15
+\STATE Freeze the analysis plan, split files and code by hashing them
+\FOR[\textit{Study~I}]{seed $k\in\{0,1,2\}$}
+ \FOR{step $=1$ \TO \num{37500}}
+  \STATE Compose a batch: re-weight $B$, shared affine, insertion, tone curve $\gamma$, $B'=X'-S'$
+  \STATE Build twins $x^{+}=\min(x+n,1)$, $n$ from $\mathcal{L}_{\mathrm{train}}$, for half of the batch
+  \STATE Update $f_k$ with AdamW on $\mathcal{L}$ of Eq.~\eqref{eq:twin}; update EMA weights
+ \ENDFOR
+\ENDFOR
+\STATE $\bar f,\sigma\gets$ Eq.~\eqref{eq:ensemble}; calibrate $q$ on Qure validation pixels (Eq.~\eqref{eq:conformal})
+\FOR[\textit{audit}]{each real test image $x$}
+ \STATE Draw six lung sites with a fixed seed and lesions from $\mathcal{L}_{\mathrm{test}}$
+ \STATE For every model, compute $A$ (Eq.~\eqref{eq:absorption}) and bone overlap from independent masks
+\ENDFOR
+\STATE Score fidelity, rib benchmark, $\Delta$CNR and downstream tasks; test H1$'$--H5$'$ and E1--E3
+\FOR[\textit{Study~II}]{config $\in\{$orig, soft, early, hybrid, ctrl$\}$, dataset, fold, seed $0..4$}
+ \STATE Train the class-query classifier on $(X,S,\hat B)$ streams (Eqs.~\eqref{eq:tokens}--\eqref{eq:bce})
+\ENDFOR
+\STATE Seed ensembles (Eq.~\eqref{eq:seedens}); cluster-bootstrap contrasts, Holm; test H6--H10; pointing game, CRC, AURC
+\FOR[\textit{Study~III}]{seed $k\in\{0,\dots,4\}$}
+ \STATE Train the 2.5D CT teacher on $\mathcal{D}_{\mathrm{CT}}$; apply the seed-replacement rule if its logits are constant
+ \STATE Train $P_0$ and $P_1$ (Eq.~\eqref{eq:kd}); fine-tune $F_{\mathrm{in}}$, $F_{\mathrm{p0}}$, $F_{\mathrm{p1}}$ on NIH
+\ENDFOR
+\STATE Test H11--H13 (patient-cluster bootstrap, Holm), H14 (CT--X-ray map agreement), H15 (rib-emphasis flips)
+\RETURN all estimates with 95\,\% intervals, whatever their direction
+\end{algorithmic}
+\end{algorithm}

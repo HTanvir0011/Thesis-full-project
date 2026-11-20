@@ -1,0 +1,14 @@
+\begin{tabular}{lcccccc}
+\toprule
+method & bone PSNR$_{cal}$ & PSNR$_{cal}$ & SSIM$_{cal}$ & SSIM$_{cal,\sigma4}$ & LPIPS & HF ratio \\
+\midrule
+Identity & 20.208 & 26.055 & 0.831 & 0.936 & 0.264 & 1.095 \\
+CLAHE & 17.120 & 22.450 & 0.759 & 0.900 & 0.326 & 1.481 \\
+Homomorphic filter & 11.177 & 14.991 & 0.734 & 0.832 & 0.368 & 1.198 \\
+v1 (LIDC only) & 21.950 & 26.195 & 0.850 & 0.948 & 0.223 & 1.040 \\
+Reference model & 21.511 & 25.670 & 0.866 & 0.948 & 0.166 & 0.990 \\
+No-twin control ($K=3$) & 21.445 & 25.527 & 0.850 & 0.948 & 0.222 & 1.070 \\
+Ours (twin, $K=3$) & 21.455 & 25.564 & 0.845 & 0.946 & 0.234 & 1.087 \\
+BS-LDM (trained on SZCH pairs) & 28.573 & 31.950 & 0.852 & 0.976 & - & 0.900 \\
+\bottomrule
+\end{tabular}

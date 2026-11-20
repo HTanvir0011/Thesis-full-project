@@ -1,0 +1,82 @@
+\section{Introduction}
+\label{sec:intro}
+\IEEEPARstart{C}{hest} radiography is the most frequent imaging examination of the chest, but it projects the whole thorax onto one
+plane: ribs, clavicles, heart and mediastinum overlap the lung fields and can hide small abnormalities. Chest CT resolves the same
+anatomy in three dimensions, and it can therefore supervise radiograph models in ways that radiographs alone cannot. The bone and
+soft-tissue components of a projected CT are known exactly, and findings can be learned from CT without the overlap of ribs, heart and
+mediastinum. Both uses are now practical with public data, through projections rendered from chest CT \cite{angaitkar2026anatomy} and
+through CT volumes paired with report-derived findings \cite{hamamci2026ctrate}.
+
+CT-supervised models of radiographs are still judged mostly by image fidelity or classification accuracy. These aggregate measures hide
+three clinically relevant failures. A model may \emph{erase} a lesion, so that a nodule present in the radiograph is missing from its
+output; it may \emph{invent} a finding, reporting a disease that the image does not contain; or it may justify a correct output with a
+heat map that points elsewhere. A suppressor with a high peak signal-to-noise ratio (PSNR) can still erase lesions, and a classifier with
+a high area under the receiver operating characteristic curve (AUROC) can still respond to noise. This paper builds CT-supervised models
+of chest radiographs and tests them for all three failures.
+
+Dual-energy subtraction (DES) separates bone from soft tissue, but it needs dedicated hardware and a second exposure
+\cite{kuhlman2006des,sun2026bsldm}. Software bone suppression avoids both. Radiologists find more nodules with suppressed images
+\cite{freedman2011lung}, and suppressed images have been compared with computer-aided detection \cite{schalekamp2014cad} and used as
+classifier inputs \cite{rajaraman2021bone}. Current learning-based suppressors either render paired supervision from chest CT, projecting
+bone, non-lung soft tissue and lung separately \cite{angaitkar2026anatomy}, or train diffusion models on real DES pairs
+\cite{chen2024bsdiff,sun2026bsldm,sun2025gllcm,sun2026debonedit}. In the CT-supervised line, lesion preservation has been assessed only
+indirectly, through detection gains and the contrast of boxed lesions \cite{angaitkar2026anatomy}.
+
+Suppressors are judged by how closely their output matches a bone or soft-tissue reference. A network rewarded for predicting bone can,
+however, move lesion signal into the bone image, so that the lesion disappears from the suppressed radiograph. Because a model that does
+nothing never absorbs a lesion, absorption has to be read next to suppression strength. Simulated nodules have been used to measure
+contrast after hand-built clavicle suppression and in phantoms \cite{hogeweg2013suppression,takagi2020dose}, and learned image-to-image
+models are known to remove or invent content in other modalities
+\cite{cohen2018distribution,antun2020instabilities,bhadra2021hallucinations,tivnan2024hallucination}. In our search (PubMed, arXiv and
+Crossref) we found no audit of learned bone suppression against an exactly known, additive lesion signal, and no training objective aimed
+at it.
+
+Whether suppression helps a classifier is a separate question. The suppressed images are computed from the radiograph and add no
+information that a classifier could not extract itself, so a gain must come from the prior that the suppressor learned from CT or from
+the way a network uses the extra images. A network that reads three images spends three times the computation; a gain can therefore be
+credited to suppression only against a control of the same capacity. Seed variation and analytic flexibility can easily produce spurious
+differences \cite{varoquaux2022failures,simmons2011falsepositive}, which is why every comparison here is paired, repeated over seeds and
+fixed in advance.
+
+CT can also teach a radiograph classifier directly. Knowledge distillation trains a student to match the softened outputs of a teacher
+\cite{hinton2015distilling}, and cross-modal distillation transfers supervision between modalities through paired images
+\cite{gupta2016crossmodal}. Each Qure.ai projection is built from one CT-RATE volume, so a CT classifier can teach an X-ray model on
+images of the same patients, and one transformer family \cite{liu2022swinv2} can serve both modalities, which allows their heat maps to be
+compared in the same patient. Whether such a transfer improves real-radiograph classification, aligns the explanations of the two models
+or reduces hallucinated findings has not been tested.
+
+We address these questions in three studies, each governed by an analysis plan that was pre-specified and hash-frozen before testing but
+not deposited in a public registry. Study~I measures and reduces lesion erasure by CT-supervised bone suppressors, Study~II tests whether
+classifiers gain from the suppressed images, and Study~III distils a Swin CT teacher into Swin radiograph classifiers. The main
+contributions are:
+\begin{itemize}
+\item We define a counterfactual lesion audit that measures the fraction $A$ of an exactly known, additive lesion signal that a
+ suppressor moves into its bone image, at sites shared by all models and reported beside suppression strength.
+\item We introduce a twin lesion-invariance regulariser, trained on public CT-derived projections in a three-model ensemble with
+ split-conformal intervals. On the locked VinDr-RibCXR set the ensemble absorbed 0.051 of an added lesion, against 0.149 for a released
+ CT-supervised model and 0.178 for a matched control, at non-inferior bone-region PSNR.
+\item We evaluate the suppressors on locked sets (paired dual-energy images, an annotated rib set, real nodules, downstream detection and
+ classification) and externally on paediatric radiographs, with every hypothesis fixed in advance and every deviation disclosed.
+\item We test bone-suppressed classifier inputs in five configurations, including a multi-stream network and a capacity-matched control
+ (175 runs on three datasets). As separate streams the suppressed inputs did not raise macro-AUROC on any dataset (NIH $+0.0001$
+ $[-0.0022, 0.0024]$); as extra channels they gave small gains (NIH up to $+0.006$).
+\item We distil a 2.5D Swin CT teacher into Swin X-ray classifiers through paired projections and audit accuracy, CT--X-ray heat-map
+ agreement, localisation and hallucination. Distillation did not improve NIH classification ($-0.0001$ $[-0.0016, 0.0014]$); Swin
+ Grad-CAM++ located expert boxes less than half as often as DenseNet-121, yet noise flipped far fewer finding-free images for Swin
+ (27--29\,\% against 78\,\%).
+\end{itemize}
+
+Fig.~\ref{fig:workflow} summarises the three studies. Section~\ref{sec:related} reviews related work and the gaps that motivate the
+design. Section~\ref{sec:methods} formalises the audit and describes the data, the three studies and the statistical analysis.
+Section~\ref{sec:results} reports the results of all pre-specified hypotheses, Section~\ref{sec:discussion} discusses them together with
+the limitations, and Section~\ref{sec:conclusion} concludes.
+
+\begin{figure*}[!t]
+\centering
+\safefig[0.9\textwidth]{figures/fig_workflow.pdf}
+\caption{Workflow of the three studies, from data to models, evaluation and the main result. Study~I trains and audits CT-supervised
+bone suppressors, Study~II tests the suppressed images as classifier inputs against a capacity-matched control, and Study~III distils a
+2.5D Swin CT teacher into Swin X-ray classifiers. All hypotheses were fixed in analysis plans that were hash-frozen before testing;
+training ran in cloud GPU kernels, and every reported number is computed by scripts from the saved outputs.}
+\label{fig:workflow}
+\end{figure*}

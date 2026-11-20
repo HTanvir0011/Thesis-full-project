@@ -1,0 +1,120 @@
+\FloatBarrier
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Principal Findings, Lesion Fidelity and the Cost of the Regulariser}
+\label{sec:d-principal}
+CT-supervised bone suppression can be made lesion-faithful, and its images help prediction in a specific way. Lesion absorption fell
+steadily with the twin weight (Table~\ref{tab:twin}); on an audit set that no model had seen during development, the twin ensemble absorbed
+a third of what the released CT-supervised model absorbed and less than a third of what the matched control absorbed
+(Tables~\ref{tab:audit_means} and~\ref{tab:audit}), at non-inferior bone-region fidelity; and the effect replicated with two other encoders
+(Table~\ref{tab:encoders}) and on paediatric radiographs (Section~\ref{sec:res-bdcxr}). Added as extra channels, the suppressed images
+raised nodule detection on Node21, detection on VinBigData and classification on NIH (Table~\ref{tab:downstream}), and in the fusion study
+they favoured focal findings, both in AUROC and in where the attribution maps pointed (Tables~\ref{tab:groups} and~\ref{tab:pointing}).
+
+Several planned results did not hold. Our soft-tissue image alone did not improve any downstream task (Table~\ref{tab:downstream}); a
+multi-stream classifier that read the radiograph, soft-tissue and bone images did not improve on the radiograph alone (H6,
+Table~\ref{tab:fusion}); SSIM fell short of the reference model by more than its margin (Table~\ref{tab:fidelity}); real-nodule contrast was
+higher than with the reference model on JSRT and lower on Node21 (Table~\ref{tab:cnr}); and conformal intervals calibrated on synthetic
+data covered 14\,\% instead of 90\,\% of real bone pixels, 89\,\% after an exploratory recalibration on 24 real pairs
+(Table~\ref{tab:reliability}).
+
+\emph{What the audit adds.} Fidelity metrics and lesion absorption rank suppressors differently (Fig.~\ref{fig:pareto}). The v1 model has
+the highest bone-region PSNR of the CT-supervised models and the highest absorption; ours and the reference model are within 0.06\,dB of
+each other and a factor of three apart in absorption. BS-LDM, trained on dual-energy pairs from the evaluation hospital, is about 7\,dB ahead
+in fidelity on that hospital's images, yet absorbed 0.42 of an inserted lesion in the development audit (at unpaired sites, so only
+descriptive): fidelity to a dual-energy target does not protect what the target never showed. Part of that lead is the appearance of the
+site's dual-energy images rather than suppression: a smooth calibration learned from 24 pairs of the site raised every CT-supervised model
+by 2.1 to 2.4\,dB in the bone region without raising lesion absorption, and BS-LDM remained about 5\,dB ahead
+(Section~\ref{sec:res-sitecal}; exploratory). Absorption must still be read beside suppression strength. The reference model removes more
+rib-edge energy than ours (48\,\% against 30\,\%) and more non-rib energy (22\,\% against 8\,\%), so part of its higher absorption may
+reflect stronger suppression in general.
+
+\emph{What the regulariser costs.} On real paired radiographs the twin term costs no measurable bone-region fidelity up to $w=16$ (21.22 to
+21.28\,dB across $w=0\ldots16$); at $w=32$ and 64 PSNR drops by about 0.3\,dB, so $w=16$, chosen on development data before the final
+evaluation, is the usable operating point. The cost appears where the truth is exact: on the Qure.ai test split the bone error of the twin
+ensemble is 41\,\% higher than that of the control (MAE 0.0041 against 0.0029; Supplementary Table~S5). The regulariser thus trades
+synthetic bone accuracy for lesion invariance, a trade not visible on real images. The ablation shows that the effect needs gradients
+through both twin branches and a consistency term confined to the pasted lesion; showing lesions during training without the twin term
+(CLIA) did not lower absorption. The reference model is a SwinV2-B at $1024$~px trained with a far larger budget, so only the matched
+no-twin control, which absorbs slightly more than the reference model (0.178 against 0.149), isolates the regulariser. After the
+exploratory site calibration the no-twin control was slightly ahead of ours (23.74 against 23.58\,dB), a cost of the regulariser that the
+uncalibrated comparison did not show; it was not tested. Diffusion models trained on real dual-energy pairs
+\cite{sun2026bsldm,sun2026debonedit} need paired data from the target site, sample slowly (about 2.5 minutes per image for BS-LDM on a T4
+GPU) and were not designed for lesion invariance.
+
+\subsection{Why Suppressed Inputs Help Focal Findings}
+\label{sec:d-focal}
+The suppressed images are deterministic functions of the radiograph (Eq.~\eqref{eq:info}): the suppressor adds a transformation learned
+from CT but no information, and a classifier trained on thousands of radiographs may learn whatever bone-invariant features its labels
+reward. The results fit a modest, cheap prior rather than new information. Extra channels helped, whereas the soft image alone did not; the
+multi-stream hybrid matched the radiograph alone on all three data sets, and on NIH its interval rules out a gain larger than 0.0024 in
+macro-AUROC, so the null result is informative. The hybrid also matched the capacity control, and plain channel stacking did at least as
+well as separate streams at a third of the encoder computation. Nodules and masses had the largest estimates on both adult data sets
+($+0.008$ to $+0.009$ for the soft-tissue input), and the pointing game agreed: maps of the radiograph stream found focal lesions less often
+than other findings, whereas maps of the soft-tissue stream found both about equally often. Not every signal favoured ours: on TBX11K the
+reference model's soft image helped more, and on Node21 it raised real-nodule contrast more, so our less strongly suppressing model may
+trade some contrast for lesion fidelity.
+
+Three cautions apply. The NIH test split had already been used by the downstream classifiers of Study~I, so the NIH result of the fusion
+study is a re-test with new models; VinBigData, the independent test, has a single merged nodule/mass class whose interval included zero;
+and the detection gains are established for CPM, whereas the mAP@50 intervals include zero. The loss for diffuse findings appeared on NIH
+only, mostly for infiltration; with report-derived NIH labels \cite{wang2017chestxray} and no such loss on the radiologist-labelled
+VinBigData, these data cannot tell whether suppression removes cues for diffuse disease or interacts with label noise.
+
+\subsection{Audit Circularity, Uncertainty and Clinical Translation}
+\label{sec:d-translation}
+\emph{Circularity.} The regulariser pastes lesions to teach invariance and the audit pastes lesions to measure it. The design limits the
+circularity (Section~\ref{sec:m-audit}): audit lesions come from held-out LIDC-IDRI test CTs, audit images are real radiographs, the
+confirmatory audit uses rib masks that no model has seen, and evidence that does not use insertion points the same way, namely the contrast
+of real JSRT nodules (ours above the reference model and the no-twin control) and the Node21 detection gain of the three-channel input. These
+choices limit the circularity but cannot remove it: a model that recognises pasted signal in general could still score well.
+
+\emph{Uncertainty.} The bone-image intervals held where they were calibrated and failed under the shift to real radiographs; 24 real pairs
+from the target site sufficed to restore coverage here, although transfer between sites is untested. For the classifiers, conformal risk
+control kept its guarantee for every input, but label sets holding about half of the 14 NIH labels are of little use to a reader, and the
+suppressor's own uncertainty made abstention worse in every configuration: uncertainty about the bone image is not uncertainty about the
+diagnosis.
+
+\emph{Recommendations.} A bone suppressor should be audited for lesion absorption, reported next to a suppression measure, before it is
+used; suppressed images should be shown beside the original rather than instead of it; and the ensemble spread should serve as a warning
+flag rather than a calibrated interval unless recalibrated on real pairs (it rose 2.7-fold on paediatric radiographs). Detection and
+classification models should receive suppressed images as extra channels next to the radiograph rather than as separate streams, should
+not be expected to gain more than small amounts of overall accuracy, and should be tested per finding against a control of the same
+capacity. Fidelity comparisons between CT-supervised and dual-energy-trained suppressors should separate the appearance of the test site
+from suppression, for example with a calibration on a few development pairs reported beside the uncorrected numbers.
+
+\subsection{Limitations and Future Research}
+\label{sec:limitations}
+Each limitation is stated with its consequence for how the results must be read.
+\begin{enumerate}
+\item \emph{Synthetic supervision and one source of real pairs.} The bone image of a real radiograph is never observed. Real-image fidelity
+ is measured against dual-energy soft-tissue images from one hospital and one acquisition set-up (GE Discovery XR656), which differ from
+ the radiograph in tone and fine texture, so raw and band-limited metrics are both reported and calibrated metrics are not absolute.
+\item \emph{The audit is linear and additive, and shares its mechanism with the regulariser.} Lesions are added in image units; beam
+ hardening, scatter and tone mapping are not modelled, so $A$ measures the leak of an added signal rather than clinical detectability, and
+ it is read next to a suppression gain because $A=0$ is reached by doing nothing. The real-nodule contrast and downstream subgroup analyses
+ limit, but do not remove, the circularity of inserting lesions both in training and in the audit.
+\item \emph{Development use of SZCH.} All 75 SZCH images were used in development (audit) and 24 for paired decisions, so only the 51
+ held-out pairs support fidelity claims; the recipe was revised once after the SZCH pairs had been looked at. The exploratory site
+ calibration was designed after H2$'$ was known, re-uses the 51 held-out pairs and is specific to one hospital and scanner, whose own 24
+ development pairs it was fitted on.
+\item \emph{Resolution, backbone and operating point.} Our suppressors predict at 512\,px with small encoders, the reference model at
+ 1024\,px with SwinV2-B. The SSIM gap sits in fine texture (with a band limit of $\sigma=4$ it shrinks from 0.021 to 0.002); whether
+ prediction at 1024\,px closes it was not tested. Only $w=16$ was evaluated with the full protocol.
+\item \emph{Uncertainty.} Conformal calibration treats pixels as exchangeable and was calibrated on synthetic data; the recalibration on
+ real pairs was chosen after the shift was seen and used 24 pairs from one hospital. Ensemble members share training data.
+\item \emph{Scope and external validity.} Training and paired evaluation use adult frontal radiographs; BDCXR-3257 is a single-centre
+ paediatric set with image-level labels and no patient identifiers, and its audit inserts adult nodules into children's radiographs. There
+ is no lateral imaging and no reader study. On JSRT the bone overlap of each audit site came from the reference model's bone map.
+ Downstream models were not tuned per input, the overlap analysis is not estimable on TBX11K, and the downstream gains are small and were
+ measured with one classifier and one detector. The models are for research use only.
+\item \emph{Fusion study.} One encoder (DenseNet-121) and one resolution ($256\times256$\,px) were tested; heavier encoders or full
+ resolution may use the extra streams differently. The NIH test split served the downstream experiments of Study~I as well, its labels are
+ report-derived, and VinBigData has one focal class. The per-class DeLong tests treat NIH images as independent although patients
+ contribute several images, and the pointing game depends on the attribution method, the 15\,px tolerance and the eight annotated NIH
+ classes.
+\end{enumerate}
+
+\emph{Future research.} Future work should test prediction at $1024$~px, recalibration on real pairs from more sites, other lesion types,
+detectors that receive the suppressed images as extra channels at full resolution, a reader study and a prospective evaluation.

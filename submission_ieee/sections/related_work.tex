@@ -1,0 +1,133 @@
+\section{Related Work and Motivation}
+\label{sec:related}
+
+\subsection{Bone Suppression and CT-Derived Supervision}
+\label{sec:rw-bone}
+Early learning-based rib suppression used massive-training artificial neural networks \cite{suzuki2006mtann}. Later work used
+convolutional networks, for example a cascade of multi-scale networks in the gradient domain \cite{yang2017cascade} and other deep models
+\cite{gusarev2017deep}. Recent methods train diffusion models on paired radiographs and DES soft-tissue images
+\cite{chen2024bsdiff,sun2026bsldm,sun2025gllcm,sun2026debonedit}. The SZCH-X-Rays data set was compiled for BS-LDM \cite{sun2026bsldm}
+and made public with DeBoneDiT \cite{sun2026debonedit}; these methods train on hundreds of paired images, at up to $1024\times1024$
+pixels. Paired DES images are scarce, however, and they come from a few scanners.
+
+CT removes this bottleneck. Angaitkar et al. \cite{angaitkar2026anatomy} build digitally reconstructed radiographs from chest CT, project
+bone, non-lung soft tissue and lung separately, and train models that predict one component. Their projections are released on the
+Hugging Face Hub and are built from CT-RATE volumes \cite{hamamci2026ctrate}: the release holds \num{21887} projections whose volume names
+are those of CT-RATE. We train on these projections and use the released weights as the main comparator. Our models differ in encoder and
+resolution (ConvNeXt-V2-T at 512~px against SwinV2-B at 1024~px) and in sample budget, and they add the twin regulariser, the ensemble
+and the audit. For the encoder we start from SwinV2-T \cite{liu2022swinv2} and screen ConvNeXt V2 \cite{woo2023convnextv2}, DINOv3
+\cite{simeoni2025dinov3} and RAD-DINO \cite{perezgarcia2025raddino} under the same recipe: a modern convolutional encoder, a general
+self-supervised vision transformer and a vision transformer pre-trained on chest radiographs.
+
+Suppressed images also serve downstream models: they have been used to classify tuberculosis-consistent findings
+\cite{rajaraman2021bone}, and readers and computer-aided detection have been compared with and without them
+\cite{freedman2011lung,schalekamp2014cad}. A suppressed image can be given to a classifier alone, stacked with the radiograph as
+channels, or as a separate input stream. The last two add computation, which a fair comparison has to match with a control of equal
+capacity.
+
+\subsection{Lesion Fidelity and Counterfactual Auditing}
+\label{sec:rw-fidelity}
+Learned image-to-image models can remove or invent content. Distribution matching in translation networks can drop or hallucinate lesions
+\cite{cohen2018distribution}, deep reconstruction can be unstable to small structures \cite{antun2020instabilities}, and hallucinations of
+learned reconstruction have been defined and measured \cite{bhadra2021hallucinations,tivnan2024hallucination}. Inserting known features
+or signals into images is an established way to test learned MRI reconstruction \cite{cheng2020addressing} and the effect of learned
+denoising on signal detection \cite{li2021assessing}. For bone suppression, simulated nodules were inserted to measure contrast after a
+hand-built clavicle suppression method \cite{hogeweg2013suppression}, and a phantom with a simulated nodule at many positions was used to
+measure contrast after bone suppression \cite{takagi2020dose}.
+
+These studies measure lesion contrast. Contrast alone cannot separate a suppressor that keeps a lesion from one that suppresses weakly,
+and a fidelity score computed over the whole image is dominated by normal anatomy. Our audit therefore measures the fraction of a known
+additive lesion signal that a learned suppressor moves into its bone image, on real radiographs, at sites shared by every model compared,
+and it reports this fraction next to suppression strength.
+
+\subsection{Uncertainty Quantification and Selective Classification}
+\label{sec:rw-uq}
+Deep ensembles give a simple estimate of predictive uncertainty \cite{lakshminarayanan2017ensembles}, and split-conformal prediction turns
+an error score into intervals with a coverage guarantee under exchangeability \cite{lei2018conformal,angelopoulos2023conformal}. We use
+both for the bone image. The guarantee holds only when calibration and test images are exchangeable; a suppressor trained and calibrated
+on CT-derived projections and applied to real radiographs breaks this assumption, and the size of the resulting loss of coverage has to be
+measured rather than assumed.
+
+For classification uncertainty we use conformal risk control of the false-negative rate \cite{angelopoulos2022crc}, class-conditional
+(Mondrian) conformal sets \cite{vovk2005algorithmic} and selective classification with the area under the risk--coverage curve (AURC)
+\cite{geifman2017selective,geifman2019bias}. Selective classification fits a screening setting: predictions with low uncertainty are
+accepted, and the rest are referred to a reader.
+
+\subsection{Cross-Modality Knowledge Transfer and Explainability}
+\label{sec:rw-xm}
+Knowledge distillation trains a student to match the tempered outputs of a teacher \cite{hinton2015distilling}, and cross-modal
+distillation uses paired images to transfer supervision from a modality with rich signal to one without it \cite{gupta2016crossmodal}. For
+the chest, CT-RATE pairs non-contrast CT volumes with findings extracted from their reports \cite{hamamci2026ctrate}, and the released
+projections of its volumes \cite{angaitkar2026anatomy} supply a radiograph-like view of the same scans. This makes distillation from CT to
+radiographs possible with public data alone; we found no study that tests whether it improves real-radiograph classification.
+
+For multi-label chest radiograph classification we use a class-query decoder over spatial tokens, as in query-based multi-label heads
+\cite{liu2021query2label,ridnik2023mldecoder}, so that the attention of each class on each input stream can be read out. Attribution maps
+are computed with Grad-CAM++ \cite{chattopadhay2018gradcampp} and Integrated Gradients \cite{sundararajan2017axiomatic}. Gradient-based
+heat maps such as Grad-CAM++ were developed for convolutional networks but are widely applied to transformers; their localisation can be
+scored against expert annotations with the pointing game \cite{zhang2018topdown}. Hallucination has been defined and measured mainly for
+learned image reconstruction \cite{bhadra2021hallucinations,tivnan2024hallucination}. For classifiers we test it as the appearance of a
+finding under perturbations that add none, and as the response to counterfactual lesions.
+
+Table~\ref{tab:literature} compares the studies closest to ours. Three gaps motivate the design: lesion erasure by learned suppressors has
+not been measured against an exactly known signal; gains from suppressed inputs have not been compared against a capacity-matched
+control; and the uncertainty, localisation and hallucination of CT-supervised radiograph models have not been audited together.
+
+\begin{table*}[!t]
+\centering
+\caption{Comparison of studies on bone suppression, suppressed images as model inputs, lesion-fidelity evaluation and cross-modal
+distillation with the present work. Check marks indicate whether a study reports each element: a counterfactual or simulated-lesion
+audit (Lesion), a capacity-matched control (Cap.), uncertainty quantification or calibration (UQ), validation on external data (Ext.)
+and explanation maps (XAI). \checkmark: reported; (\checkmark): qualitative only; --: not reported; n/a: not applicable to the study
+design (no model trained by the authors, no input added to a model, or no clinical task). Rows marked $^{\dagger}$ were assessed from the
+abstract because the full text is not openly accessible; all other rows from the full text.}
+\label{tab:literature}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.6cm}>{\raggedright\arraybackslash}p{3.4cm}%
+>{\raggedright\arraybackslash}p{3.3cm}>{\raggedright\arraybackslash}X*{5}{c}@{}}
+\toprule
+Study & Data & Method & Key result & Lesion & Cap. & UQ & Ext. & XAI\\
+\midrule
+Suzuki et al.$^{\dagger}$ \cite{suzuki2006mtann} & DES bone images for training; 118 validation and 136 independent test radiographs (14
+ institutions) & Multiresolution massive-training ANN (MTANN) & Ribs and clavicles suppressed while nodule and vessel visibility was kept
+ & -- & n/a & -- & \checkmark & n/a\\
+Yang et al.$^{\dagger}$ \cite{yang2017cascade} & 504 two-exposure DES radiographs (404 training, 100 test) & Cascade of multi-scale CNNs
+ in the gradient domain (CamsNet) & Soft-tissue PSNR 38.7\,dB, bone suppression ratio 83.8\,\%; other X-ray machines shown visually & --
+ & n/a & -- & (\checkmark) & n/a\\
+Chen et al. \cite{chen2024bsdiff} & Paired radiographs and DES soft tissue of 120 patients, one hospital (7:2:1 split) & Conditional
+ diffusion model (BS-Diff) & Diffusion-based suppression with a clinical image-quality evaluation & -- & n/a & -- & -- & n/a\\
+Sun et al. \cite{sun2026bsldm} & SZCH-X-Rays and JSRT (separate splits); Shenzhen set for a downstream test & Conditional latent
+ diffusion (BS-LDM) & High-resolution suppression; clinical and downstream lesion-detection evaluation & -- & n/a & -- & \checkmark
+ & n/a\\
+Sun et al. \cite{sun2025gllcm} & SZCH-X-Rays (592/74/75) and JSRT (192/24/25) & Global-local latent consistency model (GL-LCM) &
+ Suppression in 50 sampling steps, 8.54\,s against 84.62\,s for BS-LDM & -- & n/a & -- & -- & n/a\\
+Sun et al. \cite{sun2026debonedit} & SZCH-X-Rays (released here) and JSRT; Asraf set for a downstream test & Depth-driven conditional
+ bridge diffusion transformer (DeBoneDiT) & Public paired DES data; downstream classification on an external set & -- & n/a & -- &
+ \checkmark & n/a\\
+Angaitkar et al. \cite{angaitkar2026anatomy} & \num{21887} CT-RATE projections; TBX11K, Node21, VinDr-CXR & Anatomy-decomposed CT
+ projections, SwinV2-B at 1024~px & Detection gains and higher real-nodule contrast; no lesion-insertion audit & -- & n/a & -- &
+ \checkmark & --\\
+Hogeweg et al.$^{\dagger}$ \cite{hogeweg2013suppression} & 20 simulated radiographs; 253 radiographs; 100 with CT nodules simulated
+ near the clavicles & Model-based suppression of elongated structures & Simulated nodules kept more contrast than the clavicles after
+ suppression (1.35 vs.\ 0.55) & \checkmark & n/a & -- & n/a & n/a\\
+Takagi et al.$^{\dagger}$ \cite{takagi2020dose} & Anthropomorphic phantom, 12\,mm simulated nodule at 66 positions & Commercial
+ bone-suppression processing at low tube voltage & Nodule contrast and CNR rose away from the ribs; lower dose possible & \checkmark &
+ n/a & -- & n/a & n/a\\
+Freedman et al.$^{\dagger}$ \cite{freedman2011lung} & Reader study, 368 patients, 15 radiologists & Rib and clavicle suppression software
+ & Reader LROC AUC rose from 0.460 to 0.558 & -- & n/a & n/a & n/a & n/a\\
+Schalekamp et al.$^{\dagger}$ \cite{schalekamp2014cad} & Reader study, 300 radiographs from four institutions, 8 readers & CAD with
+ bone-suppressed images available & CAD raised reader AUC from 0.812 to 0.841 beyond suppressed images & -- & n/a & n/a & n/a & n/a\\
+Rajaraman et al. \cite{rajaraman2021bone} & JSRT and NIH-CC DES (suppression); Shenzhen and Montgomery TB sets & Suppressed image
+ replacing the radiograph as classifier input (VGG-16) & TB AUC 0.899 to 0.954 (Shenzhen) with suppressed inputs; cross-institutional
+ suppression test & -- & n/a & -- & \checkmark & \checkmark\\
+Gupta et al. \cite{gupta2016crossmodal} & NYUD2 (RGB and depth), JHMDB (RGB and optical flow) & Cross-modal distillation of mid-level
+ features & Depth-only detection mAP 34.2 to 41.7\,\% on NYUD2 & n/a & n/a & -- & n/a & --\\
+\midrule
+This work & Qure.ai/CT-RATE projections; SZCH-X-Rays, VinDr-RibCXR, JSRT, Node21, TBX11K, VinDr-CXR, NIH ChestX-ray14, CT-RATE;
+ BDCXR-3257 & Twin lesion-invariance regulariser, $K=3$ ensemble; multi-stream classifier; 2.5D Swin CT teacher distilled into Swin X-ray
+ models & $A=0.051$ vs.\ 0.149 (released) and 0.178 (control); suppressed inputs and CT distillation did not raise NIH macro-AUROC
+ & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark\\
+\bottomrule
+\end{tabularx}
+\end{table*}

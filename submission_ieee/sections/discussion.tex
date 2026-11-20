@@ -1,0 +1,137 @@
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Principal Findings, Lesion Fidelity Trade-Offs and Capacity Controls}
+\label{sec:d-principal}
+Several pre-specified results did not hold. The soft-tissue image alone did not improve any downstream task
+(Tables~\ref{tab:downstream_cls} and~\ref{tab:downstream_det}); a multi-stream classifier that read the radiograph, soft-tissue and bone
+images did not improve on the radiograph alone (H6, Table~\ref{tab:cls_primary}); SSIM fell short of the reference model by more than its
+margin (Table~\ref{tab:h2}); and conformal intervals calibrated on synthetic data covered 14\,\% instead of 90\,\% of real bone pixels
+(Table~\ref{tab:reliability}), 89\,\% after an exploratory recalibration on 24 real pairs (Table~\ref{tab:bone_recal}). Real-nodule contrast
+was higher than with the reference model on JSRT and lower on Node21 (Table~\ref{tab:nodule_cnr}). In Study~III, distillation from CT did
+not improve real-radiograph classification (H11, H12), the CT and X-ray Grad-CAM++ maps did not agree (H14), and the Swin classifier trailed
+DenseNet-121 over the 14 diseases (H13), almost entirely through one rare class and with a reference trained twice as long at four times the
+encoder learning rate (Table~\ref{tab:xm_hyp}).
+
+The central results of Study~I held. Lesion absorption fell steadily with the twin weight (Table~\ref{tab:dose_response}); on an audit set
+no model had seen during development, the twin ensemble absorbed a third of what the released CT-supervised model absorbed and less than a
+third of what the matched control absorbed (Table~\ref{tab:audit_contrasts}), at non-inferior bone-region fidelity; and the effect
+replicated with two other encoders (Table~\ref{tab:encoders}) and on paediatric radiographs (Section~\ref{sec:res-bdcxr}).
+
+\emph{What the audit adds.} Fidelity metrics and lesion absorption rank suppressors differently (Fig.~\ref{fig:pareto}). The v1 model has
+the highest bone-region PSNR of the CT-supervised models and the highest absorption; ours and the reference model are within 0.06\,dB of
+each other and a factor of three apart in absorption. BS-LDM, trained on dual-energy pairs from the evaluation hospital, is about 7\,dB ahead
+in fidelity on that hospital's images, yet absorbed 0.42 of an inserted lesion in the development audit (at unpaired sites, so only
+descriptive): fidelity to a dual-energy target does not protect what the target never showed. Part of that lead is the appearance of the
+site's dual-energy images rather than suppression: a smooth calibration learned from 24 pairs of the site raised every CT-supervised model
+by 2.1 to 2.4\,dB in the bone region without raising lesion absorption, and BS-LDM remained about 5\,dB ahead
+(Section~\ref{sec:res-sitecal}; exploratory). Absorption must still be read beside
+suppression strength. The reference model removes more rib-edge energy than ours (48\,\% against 30\,\%) and more non-rib energy (22\,\%
+against 8\,\%), so part of its higher absorption may reflect stronger suppression in general.
+
+\emph{What the regulariser costs.} On real paired radiographs the twin term costs no measurable bone-region fidelity up to $w=16$ (21.22 to
+21.28\,dB across $w=0\ldots16$); at $w=32$ and 64 PSNR drops by about 0.3\,dB, so $w=16$, chosen on development data before the freeze, is
+the usable operating point. The cost appears where the truth is exact: on the Qure-projection test split the bone error of the twin ensemble
+is 41\,\% higher than that of the control (MAE 0.0041 against 0.0029). The regulariser thus trades synthetic bone accuracy for lesion
+invariance, a trade not visible on real images. The ablation shows that the effect needs gradients through both twin branches and a
+consistency term confined to the pasted lesion; showing lesions during training without the twin term (CLIA) did not lower absorption. The
+reference model is a SwinV2-B at $1024$~px trained with a far larger budget, so only the matched no-twin control, which absorbs slightly more
+than the reference model (0.178 against 0.149), isolates the regulariser. After the exploratory site calibration the no-twin control was
+slightly ahead of ours (23.74 against 23.58\,dB), a cost of the regulariser that the uncalibrated comparison did not show; it was not
+tested. Diffusion models trained on real dual-energy pairs
+\cite{sun2026bsldm,sun2026debonedit} need paired data from the target site, sample slowly (about 2.5 minutes per image for BS-LDM on a T4
+GPU) and were not designed for lesion invariance.
+
+\emph{Do classifiers gain from suppressed inputs?} The multi-stream hybrid matched the radiograph alone on all three datasets; on NIH the
+interval rules out a gain larger than 0.0024 in macro-AUROC, so the null result is informative. The hybrid also matched the capacity
+control, and plain channel stacking did at least as well as separate streams. Eq.~\eqref{eq:info} offers one explanation: the suppressor
+adds a transformation learned from CT but no information, and a classifier trained on thousands of radiographs may learn whatever
+bone-invariant features its labels reward. Nodules and masses had the largest estimates on both adult datasets ($+0.008$ to $+0.009$ for
+the soft-tissue input), and the pointing game agreed: maps of the radiograph stream found focal lesions less often than other findings,
+whereas maps of the soft-tissue stream found both about equally often. Two cautions apply. The NIH test split had already been used by the
+downstream classifiers of Study~I, so the NIH result is a re-test with new models; and VinBigData, the independent test, has a single merged
+nodule/mass class whose interval included zero. The loss for diffuse findings appeared on NIH only, mostly for infiltration; with
+report-derived NIH labels \cite{wang2017chestxray} and no such loss on the radiologist-labelled VinBigData, these data cannot tell whether
+suppression removes cues for diffuse disease or interacts with label noise.
+
+\subsection{Cross-Modality Transfer Limits, Localization Faithfulness and Robustness}
+\label{sec:d-xm}
+\emph{Why CT did not teach the radiograph classifier.} The distilled classifier matched the one started from ImageNet within $\pm0.0016$
+AUROC on the shared findings and matched the classifier pretrained on the same projections without the teacher. First, the teacher had
+little to give: on the six findings it was hardly more accurate on CT (0.821) than $P_0$ on the projections of the same test patients
+(0.814), and it was weakest for lung lesions (0.608), where CT should help most. Second, the 2.5D recipe was fragile, with one collapsed and
+one late-learning run in seven, so students learned from teachers of uneven quality. Third, gains on the projections had to survive the move
+to real radiographs: the zero-shot results (0.640--0.648 on NIH) show how wide that gap is, and ten epochs of fine-tuning on \num{77890}
+radiographs may override the initialisation, as the equal results of $F_{\mathrm{p0}}$ and $F_{\mathrm{in}}$ suggest. The negative result
+therefore concerns this teacher and this amount of paired CT, not cross-modal distillation in general.
+
+\emph{Explanations and robustness.} The two modalities did not produce maps of the same kind. The teacher's Grad-CAM++ mainly ranks slices,
+so its projected map varies from top to bottom but hardly across, while the $8\times8$ token grid of the last SwinV2-T stage gives
+Grad-CAM++ maps that spread along the image borders. On real radiographs Swin Grad-CAM++ hit expert boxes less than half as often as
+DenseNet-121 Grad-CAM++, whereas Integrated Gradients and decoder attention localised about as well for both encoders; agreement between
+modalities should therefore be measured with maps that localise. Robustness, in turn, was not visible in accuracy: the Swin classifiers were
+not more accurate than DenseNet-121, but noise flipped about a third as many finding-free images (0.27--0.29 against 0.78). Under rib
+emphasis the distilled classifier flipped fewer images than the one started from ImageNet ($p=0.044$, uncorrected), but so did the classifier
+pretrained on projections without the teacher, which points to pretraining rather than to CT.
+
+\emph{Uncertainty.} The bone-image intervals held where they were calibrated and failed under the shift to real radiographs; 24 real pairs
+from the target site sufficed to restore coverage here, although transfer between sites is untested. For the classifiers, conformal risk
+control kept its guarantee for every input and encoder, but label sets holding about half of the 14 NIH labels are of little use to a
+reader, and the suppressor's own uncertainty made abstention worse in every configuration: uncertainty about the bone image is not
+uncertainty about the diagnosis.
+
+\subsection{Clinical Translation, Limitations and Future Research}
+\label{sec:limitations}
+\emph{Recommendations.} A bone suppressor should be audited for lesion absorption, reported next to a suppression measure, before it is
+used; suppressed images should be shown beside the original rather than instead of it; and the ensemble spread should serve as a warning
+flag rather than a calibrated interval unless recalibrated on real pairs (it rose 2.7-fold on paediatric radiographs). Classifiers should not
+be expected to gain more than small amounts of overall accuracy from bone-suppressed inputs, which helped only as extra channels, or from a
+CT teacher of this kind, and any benefit should be tested per finding against a control of the same capacity. Swin classifiers of
+radiographs should be explained with Integrated Gradients or decoder attention rather than Grad-CAM++, with maps scored against expert
+boxes, and claims of robustness should rest on perturbations that add no disease. Fidelity comparisons between CT-supervised and
+dual-energy-trained suppressors should separate the appearance of the test site from suppression, for example with a calibration on a few
+development pairs reported beside the uncorrected numbers.
+
+\emph{Limitations.} Each limitation is stated with its consequence for how the results must be read.
+\begin{enumerate}
+\item \emph{Synthetic supervision and one source of real pairs.} The bone image of a real radiograph is never observed. Real-image fidelity
+ is measured against dual-energy soft-tissue images from one hospital and one acquisition set-up (GE Discovery XR656), which differ from
+ the radiograph in tone and fine texture, so raw and band-limited metrics are both reported and calibrated metrics are not absolute.
+\item \emph{The audit is linear and additive, and shares its mechanism with the regulariser.} Lesions are added in image units; beam
+ hardening, scatter and tone mapping are not modelled, so $A$ measures the leak of an added signal rather than clinical detectability, and
+ it is read next to a suppression gain because $A=0$ is reached by doing nothing. The real-nodule contrast and downstream subgroup analyses
+ limit, but do not remove, the circularity of inserting lesions both in training and in the audit.
+\item \emph{Development use of SZCH.} All 75 SZCH images were used in development (audit) and 24 for paired decisions, so only the 51
+ held-out pairs support fidelity claims; the plan changed once after the SZCH pairs had been looked at. The exploratory site calibration
+ (SAP\_v5) was designed after H2$'$ was known, re-uses the 51 held-out pairs and is specific to one hospital and scanner, whose own 24
+ development pairs it was fitted on.
+\item \emph{Resolution, backbone and operating point.} Our suppressors predict at 512\,px with tiny encoders, the reference model at
+ 1024\,px with SwinV2-B. The SSIM gap sits in fine texture (with a band limit of $\sigma=4$ it shrinks from 0.021 to 0.002); whether
+ prediction at 1024\,px closes it was not tested. Only $w=16$ was evaluated with the full protocol.
+\item \emph{Uncertainty.} Conformal calibration treats pixels as exchangeable and was calibrated on synthetic data; the recalibration on
+ real pairs was chosen after the shift was seen and used 24 pairs from one hospital. Ensemble members share training data.
+\item \emph{Scope and external validity.} Training and paired evaluation use adult frontal radiographs; BDCXR-3257 is a single-centre
+ paediatric set with image-level labels and no patient identifiers, and its audit inserts adult nodules into children's radiographs. There
+ is no lateral imaging and no reader study. On JSRT the bone overlap of each audit site came from the reference model's bone map.
+ Downstream models were not tuned per input, and the overlap analysis is not estimable on TBX11K. The models are for research use only.
+\item \emph{Classifier study.} One encoder (DenseNet-121) and one resolution ($256\times256$\,px) were tested; heavier encoders or full
+ resolution may use the extra streams differently. The NIH test split served the downstream experiments of Study~I as well, its labels are
+ report-derived, and VinBigData has one focal class. The per-class DeLong tests treat NIH images as independent although patients
+ contribute several images, and the pointing game depends on the attribution method, the 15\,px tolerance and the eight annotated NIH
+ classes.
+\item \emph{Cross-modality study.} The 2.5D CT recipe was seed-unstable, and the replacement of seed 2 by seed 5 followed a rule fixed
+ beforehand but used a teacher trained later. The CT subset is small (\num{1600} training volumes) and its labels are report-derived. The
+ localisation of the H13 difference in hernia (86 positive test images) comes from per-class tests planned only as descriptive, and H13
+ compares encoders trained with different pre-specified budgets (DenseNet-121 for 20 epochs at the full encoder learning rate, Swin for 10
+ epochs at a quarter of it), neither tuned further; the reference's NIH test score was known from Study~II when the fourth plan was
+ frozen. H14 relies on Grad-CAM++ for both modalities, the least localising of the three maps on real radiographs. The example heat maps
+ contain no mass or nodule, and VinBigData fine-tuning was not run. Teacher outputs, predictions and weights reached the authors' computer
+ against the design's own data rule; nothing derived from CT-RATE was released.
+\item \emph{Post-freeze corrections and registration.} Analysis errors found in an independent check after the first locked run were
+ corrected (among them a resampling error that narrowed interaction intervals and detection metrics that depended on the order of tied
+ scores by up to 0.00055); cloud and local GPU outputs differ by at most 0.0024\,dB. No pre-specified verdict changed. The analysis plans
+ were hash-frozen in version control before testing but not deposited in a public registry.
+\end{enumerate}
+
+\emph{Future research.} Future work should test prediction at $1024$~px, recalibration on real pairs from more sites, other lesion types and
+readers, and, for transfer from CT, a stable volumetric teacher trained on many more volumes.

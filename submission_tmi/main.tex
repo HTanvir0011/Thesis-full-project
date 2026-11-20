@@ -1,0 +1,99 @@
+% =====================================================================================================================
+% IEEE two-column journal paper: lesion-faithful bone suppression and its use for focal lesion detection and classification.
+% Sections in sections/*.tex (appendix in sections/appendix.tex), references in sections/references.tex,
+% supplementary material in supplementary.tex (compiled on its own).
+% tables/ and figures/ hold the generated result tables and figures; never retype a number.
+% Compile with pdfLaTeX (Overleaf). Red [TODO: ...] markers are the only places that need the authors' input.
+% =====================================================================================================================
+\documentclass[journal]{IEEEtran}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{cite}
+\usepackage{url}
+\usepackage{xcolor}
+\usepackage{siunitx}
+\usepackage{adjustbox}
+\usepackage{placeins}
+\usepackage[hidelinks]{hyperref}
+
+\def\UrlBreaks{\do\/\do\.\do\_\do\-}
+\setlength{\emergencystretch}{2em}
+% Many floats: let more of them share a page so they stay close to the text that cites them.
+\renewcommand{\topfraction}{0.9}\renewcommand{\dbltopfraction}{0.9}\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.7}\renewcommand{\dblfloatpagefraction}{0.7}
+\setcounter{topnumber}{4}\setcounter{dbltopnumber}{4}\setcounter{totalnumber}{6}
+
+% Red placeholder for text only the authors can supply.
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+% Figure that shows a red box instead of stopping the build if the file is missing.
+\newcommand{\safefig}[2][\linewidth]{%
+  \IfFileExists{#2}%
+    {\includegraphics[width=#1]{#2}}%
+    {\fbox{\parbox[c][2.4cm][c]{0.92\linewidth}{\centering\todo{missing figure #2}}}}}
+\providecommand{\doi}[1]{\url{https://doi.org/#1}}
+% Generated result table (tables/<name>.tex), shrunk to fit: \restable{name} in a table, \restable[\textwidth]{name} in a table*.
+\newcommand{\restable}[2][\columnwidth]{\begin{adjustbox}{max width=#1}\footnotesize\input{tables/#2.tex}\end{adjustbox}}
+% Sub-heading inside a table that stacks two generated tables.
+\newcommand{\subtab}[1]{\par\smallskip\noindent{\footnotesize\textit{#1}}\par\smallskip}
+
+\begin{document}
+
+\title{Lesion-Faithful Bone Suppression from Chest CT Projections: Counterfactual Auditing and Gains for Focal Lesion Detection
+and Classification in Chest Radiographs}
+
+\author{Tanvir~Hossin\todo{remaining authors}%
+\thanks{T.~Hossin is with the Department of Computer Science and Engineering, Daffodil International University, Savar, Dhaka,
+Bangladesh. \todo{affiliations of the other authors}}%
+\thanks{Corresponding author: \todo{name and e-mail address}.}%
+\thanks{This retrospective study used public data sets under their licences, VinDr-RibCXR under its data use agreement, and the
+paediatric BDCXR-3257 radiographs under ethical approval REC-FSIT-2025/No:~11928 of Daffodil International University and a data use
+agreement with Dr.~M~R~Khan Shishu Hospital \& Institute of Child Health, Dhaka. No new patient data were collected.}}
+
+\markboth{\todo{journal name}}{Hossin \MakeLowercase{\textit{et al.}}: Lesion-Faithful Bone Suppression from Chest CT Projections}
+
+\maketitle
+
+\begin{abstract}
+\textbf{Background:} Bone suppression can help readers and detectors find lesions that ribs obscure, but a suppressor trained on CT-derived
+images may also erase lesions, and fidelity metrics such as PSNR do not show it.
+\textbf{Methods:} We train bone suppressors on public CT projections with an exactly known bone image and add a twin lesion-invariance
+regulariser. We measure lesion absorption $A$, the fraction of a counterfactual nodule that the suppressor moves into its bone image, on
+real radiographs. We then test whether the suppressed images improve nodule and multi-finding detection and classification against
+capacity-matched controls, and examine uncertainty, a paediatric external set and a site calibration of the fidelity metric.
+\textbf{Results:} On VinDr-RibCXR the twin ensemble absorbed 0.051 of an added lesion, against 0.149 for a released CT-supervised model
+and 0.178 for a matched control, at non-inferior bone-region PSNR (21.46 vs.\ 21.51\,dB); the effect held across three encoders and on
+paediatric radiographs ($A=0.084$ vs.\ 0.217 and 0.251). Suppressed images added as extra channels raised Node21 detection (CPM $+0.028$,
+95\,\% CI 0.009--0.047) and NIH macro-AUROC ($+0.006$, 0.003--0.008). On NIH the soft-tissue image raised the AUROC of focal findings
+($+0.0089$, Holm $p=0.0024$) and lowered that of diffuse findings, and its Grad-CAM++ maps located focal lesions better than those of the
+radiograph (interaction $+0.145$, $p=0.0002$); a three-stream network gave no overall gain.
+\textbf{Conclusion:} A twin regulariser makes CT-supervised bone suppression lesion-faithful, and suppressed images help focal findings
+when added as extra channels, not diffuse disease or overall accuracy as separate streams.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Bone suppression, chest radiography, counterfactual evaluation, lesion fidelity, nodule detection, multi-channel fusion, uncertainty
+quantification.
+\end{IEEEkeywords}
+
+\input{sections/introduction}
+\input{sections/related_work}
+\input{sections/methods}
+\input{sections/results}
+\input{sections/discussion}
+\input{sections/conclusion}
+\input{sections/appendix}
+\input{sections/backmatter}
+
+% References: thebibliography frozen from BibTeX (see README.txt to regenerate).
+\input{sections/references}
+
+\end{document}

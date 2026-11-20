@@ -1,0 +1,10 @@
+\section{Conclusion}
+\label{sec:conclusion}
+Bone suppressors that match a dual-energy reference equally well differed threefold in how much of a lesion they moved into their bone
+image. A counterfactual audit makes this loss measurable on real radiographs, and a twin lesion-invariance regulariser trained on public
+CT-derived projections lowered it to a third of a released CT-supervised model's, at non-inferior bone-region fidelity, across encoders
+and on paediatric radiographs. The suppressed images are worth using in a specific way: added as extra channels they improved nodule
+detection on Node21 and classification on NIH, and they favoured focal findings, in AUROC and in the localisation of Grad-CAM++ maps,
+whereas separate streams gave no overall gain and diffuse findings lost. Lesion absorption should therefore be audited before
+CT-supervised suppression is used on radiographs, the ensemble spread treated as a warning flag unless recalibrated on real pairs, and
+gains from suppressed inputs expected, and tested against a control of equal capacity, for specific findings rather than overall.

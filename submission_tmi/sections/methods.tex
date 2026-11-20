@@ -1,0 +1,844 @@
+\section{Materials and Methods}
+\label{sec:methods}
+This section defines the exact image decomposition, the twin lesion-invariance objective and the counterfactual audit
+(Section~\ref{sec:m-formulation}) and describes the data, their preprocessing and splits (Section~\ref{sec:m-data}). It then describes
+the suppressors of Study~I and their evaluation (Section~\ref{sec:m-study1}), the downstream models (Section~\ref{sec:m-downstream}), the
+fusion study of Study~II (Section~\ref{sec:m-study2}), the external validation (Section~\ref{sec:m-bdcxr}) and the statistical analysis
+(Section~\ref{sec:m-stats}). Algorithm~\ref{alg:pipeline} summarises the pipeline and Fig.~\ref{fig:architecture} shows the models; the
+rendering of the first-generation (v1) training images from LIDC-IDRI CTs is described in Appendix~\ref{app:v1}. Table~\ref{tab:notation}
+lists the notation.
+
+\begin{table}[!t]
+\centering
+\caption{Notation.}
+\label{tab:notation}
+\footnotesize
+\renewcommand{\arraystretch}{1.08}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.25\linewidth}>{\raggedright\arraybackslash}p{0.71\linewidth}@{}}
+\toprule
+Symbol & Meaning \\
+\midrule
+$X$, $S$, $B$ & radiograph, soft-tissue and bone image of a training sample, $S=X-B$ \\
+$x$, $b$ & suppressor input and its exact bone target \\
+$f$, $f_k$ & suppressor (predicts the bone image); ensemble member $k$ \\
+$\bar f$, $\sigma$ & ensemble mean and per-pixel standard deviation ($K=3$) \\
+$\hat s$, $\hat B$ & soft-tissue estimate $x-\bar f(x)$; bone image $X-S$ given to the classifier \\
+$n$, $\alpha$ & inserted lesion signal and its amplitude \\
+$x^{+}$, $M$ & twin $\min(x+n,1)$; lesion support dilated by 3\,px \\
+$w$ & twin weight ($w=16$ in the final model) \\
+$A$ & lesion absorption, Eq.~\eqref{eq:absorption} \\
+$q$, $\mathcal{C}_p$ & conformal scale and interval at pixel $p$ \\
+$s$, PSNR$_{\mathrm{cal}}$ & dual-energy soft-tissue reference; calibrated PSNR \\
+$R_{\mathrm{rib}}$, $R_{\mathrm{non}}$ & gradient-energy reduction on rib-boundary and other lung pixels \\
+$\Delta_G$, $\rho_{c,s}$ & mean AUROC difference of a finding group $G$; routing of class $c$ to stream $s$ \\
+$I$ & pointing-game interaction, focal minus other targets \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure*}[!t]
+\centering
+\safefig[0.9\textwidth]{figures/fig_tmi_architecture.pdf}
+\caption{Model architectures. (a) Study~I: bone suppressor trained with the twin lesion-invariance regulariser
+(Section~\ref{sec:m-twin}); the twin $x^{+}=\min(x+n,1)$ shares the weights and the bone target of $x$. (b) Study~II: multi-stream
+classifier with a shared encoder and a class-query decoder (Section~\ref{sec:m-study2}), and the five input configurations.}
+\label{fig:architecture}
+\end{figure*}
+
+\input{sections/algorithm}
+
+% ---------------------------------------------------------------------------------------------------------------------
+\subsection{Problem Formulation and Counterfactual Audit Definitions}
+\label{sec:m-formulation}
+
+\subsubsection{Training images with an exactly known bone image}
+\label{sec:m-qure}
+A suppressor $f$ predicts the bone image of a radiograph; the suppressed (soft-tissue) image is the radiograph minus that prediction.
+Supervision needs training images whose bone image is known exactly. The final (v2) suppressors are trained on public projections of chest
+CT \cite{angaitkar2026anatomy}: each row of the Qure.ai data holds a composite radiograph $T$ and the translated bone, soft-tissue and lung
+projections $B_t$, $S_t$ and $L$ (8-bit, $512\times512$, one sample per CT volume at 100~kVp). We verified that
+\begin{equation}
+\begin{gathered}
+T=a\,S_t+\beta\,B_t+c\,L+d,\\
+X=\frac{T}{255},\quad B=\frac{\beta\,B_t}{255},\quad S=X-B
+\end{gathered}
+\label{eq:qure}
+\end{equation}
+holds up to rounding, with a per-sample bone weight $\beta$ fitted by least squares, so $B$ is the exactly additive bone image of the
+normalised input $X$. Over all \num{21887} rows the least-squares fit leaves a mean absolute residual of 0.36 grey levels per projection
+(largest 3.2 of 255).
+
+A training sample is composed on the GPU in this order. The bone image is re-weighted ($\tilde B=w_bB$, $w_b$ log-uniform in $[0.6,1.7]$,
+so $\tilde X=S+\tilde B$ stays exact); one random affine transform is applied to all maps; in the arms with counterfactual insertion
+(Table~\ref{tab:arms}), up to three lesions are inserted into $S$ with the bone target untouched; and a monotone gamma tone curve $\gamma$
+gives
+\begin{equation}
+X'=\gamma(\tilde X),\qquad S'=\gamma(S),\qquad B'=X'-S',
+\label{eq:tone}
+\end{equation}
+which keeps the decomposition exact under any monotone mapping. Linear blur is applied to $X'$ and $B'$, and noise and scatter to $X'$
+only. The first-generation (v1) suppressors were trained on radiographs rendered from LIDC-IDRI CTs with polychromatic attenuation physics
+(Appendix~\ref{app:v1}).
+
+\subsubsection{Suppression loss}
+For a predicted bone image $\hat b=f(x)$ and the target $b$, the suppression loss is
+\begin{equation}
+\begin{split}
+\mathcal{L}_{\mathrm{sup}}(\hat b,b)={}&0.5\,\lVert\hat b-b\rVert_1+0.5\,\lVert\hat b-b\rVert_2^2\\
+&+0.5\,\big(1-\mathrm{SSIM}(\hat b,b)\big)\\
+&+2.5\,\big(\lVert\hat b-b\rVert_1+\lVert\hat b-b\rVert_2^2\big)_{\mathrm{ROI}},
+\end{split}
+\label{eq:loss}
+\end{equation}
+with norms taken as means over pixels and the region of interest (ROI) taken from the lung component. The suppressed image is
+$x-\hat b$.
+
+\subsubsection{Twin lesion-invariance objective}
+\label{sec:m-twin}
+Let $f$ be the suppressor, $x$ a training image and $b$ its exact bone image. A \emph{twin} of $x$ is $x^{+}=\min(x+n,1)$, where $n\ge0$ is
+the signal of a few lesion patches taken from the lesion library of \emph{training} CTs and pasted at random positions in the lung fields,
+in composite units and after all augmentation. The bone target of $x^{+}$ is the same $b$. Let $M$ be the lesion support dilated by
+$3$~px. The loss is
+\begin{equation}
+\begin{gathered}
+\mathcal{L}=\tfrac12\big[\mathcal{L}_{\mathrm{sup}}(f(x),b)+\mathcal{L}_{\mathrm{sup}}(f(x^{+}),b)\big]+w\,\mathcal{L}_{\mathrm{inv}},\\
+\mathcal{L}_{\mathrm{inv}}=\frac{\sum_p M_p\,\big|f(x^{+})_p-f(x)_p\big|}{\max\big(1,\sum_p M_p\big)},
+\end{gathered}
+\label{eq:twin}
+\end{equation}
+where $w$ is the twin weight. Half of every batch consists of twins, so the cost per step does not change. The supervised term already asks
+for the unchanged bone image on $x^{+}$; $\mathcal{L}_{\mathrm{inv}}$ ties the two predictions directly on the lesion support. Each twin
+carries one or two pasted lesions (uniform), each with a random scale and amplitude; the supervised term is averaged over all base images
+and twins of the batch, and $\mathcal{L}_{\mathrm{inv}}$ is normalised per image by its support and then averaged over the twins.
+Fig.~\ref{fig:insertion} shows one pasted lesion, its support $M$ and the unchanged bone target.
+
+\begin{figure}[!t]
+\centering
+\safefig[\linewidth]{figures/fig_lesion_insertion.pdf}
+\caption{Counterfactual lesion insertion, illustrated on a rendered LIDC-IDRI test CT; in training, the twins of the regulariser are built
+in the same way from Qure.ai projections with lesions of the training library. (a) Lesion signal $n$ of a 15~mm LIDC-IDRI nodule; (b) the
+composite with the lesion, $x+n$, and the dilated support $M$; (c) the bone target under the site, which the insertion leaves unchanged.}
+\label{fig:insertion}
+\end{figure}
+
+\subsubsection{Counterfactual lesion absorption}
+\label{sec:m-absorption}
+For a suppressor $f$ that outputs the bone image, an image $x$ and a lesion signal $n\ge0$ in composite-image units, the absorption at
+amplitude $\alpha$ is
+\begin{equation}
+A=\frac{\big\langle f(x+\alpha n)-f(x),\;\alpha n\big\rangle}{\big\langle \alpha n,\;\alpha n\big\rangle},
+\label{eq:absorption}
+\end{equation}
+with both inner products taken over the lesion support (the pixels where the inserted signal exceeds 2\,\% of its peak). $A=0$ means that
+the lesion stays in the soft-tissue image and $A=1$ that it was removed with the bone; $A$ is a regression slope and can fall outside
+$[0,1]$. A model that does nothing has $A=0$, so $A$ is reported together with a suppression gain and never alone. Two suppression
+measures are paired with $A$: the bone-region PSNR on the held-out SZCH pairs and, on VinDr-RibCXR, the reduction of gradient energy on
+rib-boundary pixels (the rib benchmark, Eq.~\eqref{eq:rib}).
+
+% ---------------------------------------------------------------------------------------------------------------------
+\subsection{Data Sets, Preprocessing and Splits}
+\label{sec:m-data}
+Ten data sets serve three roles in this work: sources for training the suppressors, real radiographs for evaluating them and the
+downstream models, and an external paediatric set for testing transfer to an unseen population. Table~\ref{tab:data} lists each set with
+its role, splits and licence or access condition, Fig.~\ref{fig:data_splits} shows the size of every split, and
+Fig.~\ref{fig:data_pipeline} with Table~\ref{tab:preproc} follows each image source from its raw form to the study that uses it
+(Section~\ref{sec:m-preproc}).
+
+\subsubsection{Training sources}
+The LIDC-IDRI collection \cite{armato2011lidc,armato2015lidctcia,clark2013tcia}, with some series read from the LUNA16 copy
+\cite{setio2017luna16}, supplies the v1 renders, the lesion library used to paste lesions into training images, and the synthetic test CTs.
+We used 1\,018 chest CT series from 1\,010 patients with the radiologists' nodule contours. Series were read from DICOM or from the LUNA16
+MetaImage copy (voxel-identical on all 12 series we compared, including nodule slice locations); 1\,000 series could be rendered (18 were
+skipped because of non-axial orientation or irregular slice spacing). A render was \emph{usable} if the lungs were not cut by the scan, at
+most 50 of the 512 frame rows lay beyond the scan, the lung volume was between 1.5 and 9~L and the bone volume exceeded 300~cm$^3$ (844
+usable CTs). Patients were assigned to train/validation/test (70/10/20\,\%) by a hash of the patient identifier (588/98/158 CTs;
+1\,057/172/298 consensus nodules) before any model was trained.
+
+The v2 models are trained on the public Qure.ai \texttt{ct2xr-projections} data \cite{angaitkar2026anatomy}, which hold, for each CT
+volume, a composite image and translated bone, soft-tissue and lung projections (Section~\ref{sec:m-qure}). The release holds \num{21887}
+projections, one per CT volume; the volume names are those of CT-RATE \cite{hamamci2026ctrate}. We split them by patient (\num{14374}
+patients) into \num{21051} training, 406 validation and 430 test projections.
+
+\subsubsection{Real radiographs}
+\emph{SZCH-X-Rays} holds paired radiographs and dual-energy soft-tissue images from one partner hospital \cite{sun2026bsldm,sun2026debonedit}.
+We use the 75-pair test subset; its 75 images are split into a development part (24 images) and a held-out part (51 images) by a hash of
+the file name. The 75 images are the published test split of the 741-pair version of the data set (592/74/75), acquired with dual-exposure
+DES on a GE Discovery XR656 \cite{sun2026debonedit}; an earlier version of 818 pairs was used for BS-LDM \cite{sun2026bsldm}, and the
+papers do not explain the difference.
+
+\emph{VinDr-RibCXR} holds 245 radiographs with per-rib masks \cite{nguyen2021ribcxr}. The data are licensed and are processed only on the
+licence holder's own computer and private cloud account; only metrics leave them.
+
+\emph{Nodule and detection sets.} JSRT \cite{shiraishi2000jsrt} (154 nodules), Node21 \cite{sogancioglu2024node21} (1\,476 nodule boxes, of
+which two narrower than 4\,px at 512\,px have no defined contrast, so the contrast analysis uses 1\,474), TBX11K \cite{liu2020tbx11k} and
+VinBigData (the Kaggle competition data, related to VinDr-CXR \cite{nguyen2022vindrcxr}) are used for real-lesion contrast and for
+downstream detection. The detection sets are split by a fixed hash of the image identifier: Node21 \num{3440}/\num{512}/\num{930}, TBX11K
+\num{6200}/\num{688}/\num{2088} (its official validation set serves as test set) and VinBigData \num{10433}/\num{1469}/\num{2943} images
+for training, validation and test. VinBigData boxes are kept where at least two radiologists marked the same finding; images with only
+single-reader findings are left out. No image of any set was unreadable. VinBigData is the Kaggle competition built on the VinDr-CXR images
+\cite{vinbigdata2020kaggle}; its rules allow non-commercial research use.
+
+\emph{NIH ChestX-ray14} \cite{wang2017chestxray} is used for classification with its official test list (\num{25596} images) and a
+patient-level split of the remaining images into \num{77890} training and \num{8634} validation images. The downstream models of Study~I
+and the fusion study of Study~II use the same NIH and VinBigData splits; on VinBigData an image is positive for one of the 14 findings when
+at least two of its readers marked it. The 984 expert boxes on 880 NIH test images (eight classes) are used only to score attribution maps.
+
+\subsubsection{External validation set and near-duplicate screening}
+\emph{BDCXR-3257} holds 3,257 paediatric chest radiographs (JPEG) from the Radiology and Imaging Department of Dr.~M~R~Khan Shishu Hospital
+\& Institute of Child Health, Dhaka, collected in routine care and anonymised, with one label each: normal (880), bacterial pneumonia
+(1,477) or viral pneumonia (900) \cite{durjoy2026bdcxr}, a task studied before on other paediatric sets \cite{kermany2018identifying}. Most
+children are under five years old (1,132 images under one year). The data set is public on figshare under CC BY 4.0, but we obtained it
+under the ethical approval REC-FSIT-2025/No:~11928 (Daffodil International University) and a data use agreement between the hospital and
+the authors' research group, whose terms we follow: no radiograph of this set is shown, and no image or model derived from it is
+redistributed by us. There are no patient identifiers, so near-duplicate images are grouped by their correlation at $64$~px
+($r\ge0.93$; 48 pairs, the rest single images), and a group never spans two folds.
+
+\subsubsection{Development and locked sets}
+The locked test sets were fixed before any locked-set evaluation. After the ablation of the v1 suppressors the SZCH pairs had been looked
+at, so SZCH became a development set for decisions about the final recipe, which was fixed before any held-out or locked evaluation of a
+final model. Decisions used the 24 development images, the synthetic validation data and the real-image audit on all 75 SZCH images; the
+audit on SZCH is therefore development evidence only, and the confirmatory audit runs on VinDr-RibCXR (not opened by any model run before
+the final protocol was written) and JSRT. Paired fidelity claims use the 51 held-out SZCH pairs. While the recipe was being chosen,
+screening tools printed held-out PSNR and SSIM next to the development numbers for v1-family and screening runs; no rule, table or decision
+used them, and the tool was changed to print development numbers only.
+
+\subsubsection{Preprocessing steps}
+\label{sec:m-preproc}
+Every image passes through a fixed chain before any model sees it (Fig.~\ref{fig:data_pipeline}, Table~\ref{tab:preproc}):
+\begin{enumerate}
+\item \emph{Decomposition of CT into exact components.} LIDC-IDRI CTs are split into bone, non-lung soft tissue and lung by Hounsfield
+ rules, projected along the anteroposterior axis and rendered with polychromatic physics (Appendix~\ref{app:v1}); the Qure.ai projections
+ are converted into an exactly additive radiograph and bone image (Eq.~\eqref{eq:qure}).
+\item \emph{Augmentation that keeps the decomposition exact.} Bone re-weighting, one shared affine transform, lesion insertion and a
+ monotone tone curve are applied so that $B'=X'-S'$ holds for every training sample (Eq.~\eqref{eq:tone}).
+\item \emph{Real radiographs.} Each radiograph is resized to 1024\,px by area averaging and min--max scaled; the suppressors read it at
+ 512\,px, the classifiers at 256\,px and the detector at 512\,px.
+\item \emph{Lung masks and audit sites.} Lung fields come from a published segmentation network, eroded by 49\,px, and six lesion sites
+ per image are drawn once with a fixed seed, so that every model is audited at the same places.
+\item \emph{Integrity screening and splits.} Unusable renders are removed by fixed rules, near-duplicate paediatric images are grouped, and
+ every split is made by patient, image hash or duplicate group before any model sees the corresponding test data.
+\end{enumerate}
+
+\begin{figure*}[!t]
+\centering
+\safefig[0.88\textwidth]{figures/fig_data_pipeline_tmi.pdf}
+\caption{Data preprocessing. Each row follows one image source from its raw form (left) through preprocessing and splitting (train /
+validation / test; dev: development pairs, test: held-out pairs) to the studies that use it (right; I, II). Thumbnails are real images
+where the licence allows: a LIDC-IDRI CT slice \cite{armato2015lidctcia} (CC~BY~3.0), a SZCH-X-Rays radiograph with its dual-energy
+soft-tissue image \cite{sun2026bsldm} (CC~BY-NC~4.0) and an NIH ChestX-ray14 radiograph \cite{wang2017chestxray}. $\dagger$: no image
+derived from CT-RATE is shown, so the Qure.ai row shows the composite radiograph $X$ and the exact bone image $B$ of a rendered LIDC-IDRI
+CT. $\ddagger$: dummy radiographs, variants (contrast, noise, mirroring, framing) of the same rendered LIDC-IDRI CT, stand in for data sets
+whose images are not shown (data use agreements or restrictive licences: VinDr-RibCXR, JSRT, VinBigData, BDCXR-3257, Node21; TBX11K is
+not shown either); they are not images of these data sets.}
+\label{fig:data_pipeline}
+\end{figure*}
+
+\begin{figure}[!t]
+\centering
+\safefig[\columnwidth]{figures/fig_data_splits_tmi.pdf}
+\caption{Size of every data split on a logarithmic scale. SZCH-X-Rays has only development and held-out pairs, VinDr-RibCXR and JSRT are
+test sets only, and BDCXR-3257 is used in five-fold cross-validation over near-duplicate groups.}
+\label{fig:data_splits}
+\end{figure}
+
+\begin{table*}[!t]
+\centering
+\caption{Data sets, their role, splits (train / validation / test unless stated) and licence or access condition, as stated on the
+providers' pages (read on 3 November 2026).}
+\label{tab:data}
+\footnotesize
+\renewcommand{\arraystretch}{1.08}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.1cm}>{\raggedright\arraybackslash}p{4.4cm}%
+>{\raggedright\arraybackslash}p{4.2cm}>{\raggedright\arraybackslash}X@{}}
+\toprule
+Data set & Role & Split & Licence or access \\
+\midrule
+LIDC-IDRI (TCIA) & v1 renders, lesion library, synthetic test CTs & 588 / 98 / 158 CTs (by patient) & CC BY 3.0; attribution with the data DOI \\
+Qure.ai ct2xr-projections & v2 training source (one projection per CT-RATE volume) & \num{21051} / 406 / 430 projections (by patient) & CC BY-NC-SA 4.0 \\
+SZCH-X-Rays & paired DES evaluation, site calibration & 24 development / 51 held-out pairs & CC BY-NC 4.0 \\
+VinDr-RibCXR & locked audit, rib benchmark & 245 test images & licensed; local use, metrics only \\
+JSRT & audit, nodule contrast & 247 test images (154 nodules) & free after registration; no redistribution or commercial use \\
+Node21 & nodule contrast, detection & \num{3440} / 512 / 930 images & CC BY-NC-ND 4.0 \\
+TBX11K & detection & \num{6200} / 688 / \num{2088} images & CC BY 4.0 (data) \\
+VinBigData / VinDr-CXR & detection; fusion study & \num{10433} / \num{1469} / \num{2943} images & competition rules: non-commercial research use \\
+NIH ChestX-ray14 & downstream classification; fusion study & \num{77890} / \num{8634} / \num{25596} images (test: official list) & unrestricted use with attribution \\
+BDCXR-3257 & external validation; fusion study & five folds over near-duplicate groups (\num{3257} images) & CC BY 4.0; used under the providers' data use agreement \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\begin{table*}[!t]
+\centering
+\caption{Preprocessing of each image source. All splits are by patient, by a fixed hash of the image identifier or, for BDCXR-3257, by
+near-duplicate group, and were fixed before any model saw the corresponding test data.}
+\label{tab:preproc}
+\footnotesize
+\renewcommand{\arraystretch}{1.1}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.0cm}>{\raggedright\arraybackslash}p{3.0cm}%
+>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{3.4cm}@{}}
+\toprule
+Source & Used by & Preprocessing & Integrity checks \\
+\midrule
+LIDC-IDRI CT & v1 suppressors, lesion library & Bone, non-lung soft tissue and lung masks; $\rho=\mathrm{clip}(1+\mathrm{HU}/1000,0,3)$; AP
+ projection of each component; body crop, $512\times512$; physics of Eq.~\eqref{eq:physics} at 80--130~kVp (training) or 100~kVp
+ (evaluation); composer of Eq.~\eqref{eq:compose} & 18 of 1\,018 series not renderable; usability rules leave 844 CTs; DICOM and LUNA16
+ copies voxel-identical on 12 series\\
+Qure.ai projections & v2 suppressors & 8-bit, $512\times512$; $X=T/255$, exact $B$ (Eq.~\eqref{eq:qure}); bone weight log-uniform in
+ $[0.6,1.7]$, shared affine, insertion, gamma tone curve, blur on $X'$ and $B'$, noise and scatter on $X'$ & Mean absolute residual of the
+ additive fit 0.36 grey levels (largest 3.2 of 255)\\
+Real radiographs (suppressor input) & Studies I and II & Suppressor run at 512\,px; lung masks from the TorchXRayVision PSPNet at
+ 1024\,px, eroded by 49\,px for audit sites & Masks exported once and shared by all models\\
+Classifier inputs & Study~II, downstream classification, BDCXR-3257 & $256\times256$\,px; per-image standardisation and a learned affine
+ map per stream; rotation $\le7^\circ$, scale 0.9--1.1, translation $\le3$\,\%, brightness and contrast, identical across channels &
+ VinBigData labels need two readers\\
+Detector inputs & Downstream detection & $512$\,px; boxes of findings marked by two or more readers & Node21: two boxes narrower than 4\,px
+ excluded from contrast\\
+BDCXR-3257 & External validation & JPEG; five class-stratified folds over near-duplicate groups (fold seed 0) & Correlation at 64\,px,
+ $r\ge0.93$: 48 pairs grouped\\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+% ---------------------------------------------------------------------------------------------------------------------
+\subsection{Study~I: Lesion-Faithful Bone Suppression and Deep Ensemble Uncertainty}
+\label{sec:m-study1}
+Study~I asks whether a CT-supervised suppressor can remove bone without removing lesions, and whether a twin regulariser can teach it to.
+This subsection describes the suppressors, their training arms and comparators, the ensemble and its intervals, the audit, and the
+measures used to score them on real radiographs.
+
+\subsubsection{Suppressor architecture and training}
+The suppressor (Fig.~\ref{fig:architecture}a) is a nested (UNet++) decoder \cite{zhou2018unetpp} over the four stages of a pretrained
+encoder, with CBAM attention \cite{woo2018cbam}, a plain U-Net tail with two shallow convolutional skips to full resolution and a
+$1\times1$ head that outputs the bone image directly. The v1 suppressors use a SwinV2-Tiny encoder \cite{liu2022swinv2} (ImageNet-1k,
+window 8, $512^2$ input); relative to the reference this is a smaller backbone at half the resolution, forced by compute. They were trained
+with AdamW (learning rate $2\times10^{-4}$, weight decay 0.01, 500-step warm-up, cosine decay), batch 8, mixed precision, gradient clipping
+at 1, EMA weights and \num{200000} samples per arm. The dose-response and ablation arms of v2 use the same SwinV2-T encoder; our final model
+uses a ConvNeXt-V2-T encoder \cite{woo2023convnextv2} (FCMAE pre-training, ImageNet-22k then ImageNet-1k fine-tuning
+\cite{deng2009imagenet}; \texttt{timm} \cite{wightman2019timm} model \texttt{convnextv2\_tiny.fcmae\_ft\_in22k\_in1k}) with a learning rate
+$0.25\times$ that of the decoder. Every v2 run is trained at $512$~px with AdamW \cite{loshchilov2019adamw} (learning rate
+$2\times10^{-4}$, batch 8), the schedule and loss above, and \num{300000} samples (\num{37500} steps); evaluation uses the EMA weights. The
+encoder screen uses \num{100000} samples. Every arm changes exactly one factor of its parent (Table~\ref{tab:arms}); all other settings,
+including the seed set, are identical. Table~\ref{tab:settings} collects the training settings of every model in this work.
+
+\begin{table*}[!t]
+\centering
+\caption{Training settings of all models. Learning rates are those of AdamW unless stated; EMA: exponential moving average of the
+weights.}
+\label{tab:settings}
+\footnotesize
+\renewcommand{\arraystretch}{1.08}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.6cm}>{\raggedright\arraybackslash}X%
+>{\raggedright\arraybackslash}p{4.4cm}>{\raggedright\arraybackslash}p{2.5cm}>{\raggedright\arraybackslash}p{2.7cm}@{}}
+\toprule
+Model & Architecture and input & Optimisation & Budget and seeds & Selection \\
+\midrule
+v1 suppressors & SwinV2-T encoder, UNet++/CBAM decoder; LIDC-IDRI renders at 512\,px & $2\times10^{-4}$, weight decay 0.01, 500-step
+ warm-up, cosine; batch 8; mixed precision, clipping at 1; EMA & \num{200000} samples; 3 seeds per arm & validation CTs \\
+Final suppressors (ours) & ConvNeXt-V2-T encoder (learning rate $0.25\times$), UNet++/CBAM decoder; Qure.ai projections at 512\,px; twin
+ weight $w=16$ & $2\times10^{-4}$, batch 8, same schedule; EMA & \num{300000} samples (\num{37500} steps); seeds 0--2, seed 3 reserve &
+ development data, rule fixed in advance \\
+Dose-response, ablation & SwinV2-T encoder, otherwise as ours & as ours & \num{300000} samples; 2--4 seeds per arm & -- \\
+Encoder screen & ConvNeXt V2, DINOv3, RAD-DINO (learning rate $0.25\times$) & as ours & \num{100000} samples & screening rule \\
+Downstream classifier & DenseNet-121, 256\,px & $3\times10^{-4}$, weight decay $10^{-4}$, batch 64, cosine & 10 epochs; 3 seeds & best
+ validation macro-AUROC \\
+Downstream detector & Faster R-CNN, ResNet-50 FPN, 512\,px & SGD 0.01, momentum 0.9, weight decay $10^{-4}$, batch 8 & 12 epochs; 3
+ seeds & best validation CPM \\
+Fusion classifier & shared DenseNet-121, class-query decoder (2 layers, 8 heads, $D=256$), 256\,px & $3\times10^{-4}$, weight decay
+ $10^{-4}$, batch 32, 200 warm-up steps, cosine; mixed precision & 20 epochs; seeds 0--4 (each BDCXR-3257 fold) & best validation
+ macro-AUROC \\
+BDCXR-3257 classifier (E1) & as the downstream classifier & as the downstream classifier & 10 epochs; 3 seeds per fold & 10\,\% of each
+ training part, by group \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\subsubsection{Training arms}
+Table~\ref{tab:arms} lists the arms. The dose-response varies the twin weight over $w\in\{0,4,8,16,32,64\}$ in the SwinV2-T family with 3,
+2, 2, 4, 2 and 2 seeds ($w=1$ appears only in the screening). The ablation changes one part of the regulariser at a time: a stop-gradient
+on $f(x)$; a support dilated further with a $31\times31$ window, or the whole image, instead of $M$; up to four instead of up to two pasted
+lesions; and lesion insertion into the base image without the tie term. The insertion-only arm and the last four rows of
+Table~\ref{tab:arms} form this ablation (two seeds each, SwinV2-T, $w=16$, development data).
+
+\begin{table}[!t]
+\centering
+\caption{Training arms. ``Lesions'' is the maximum number of lesions inserted into the base image (before the physics for the LIDC
+renders, before the tone curve for the Qure.ai projections); the twin arms paste 1--2 further lesions per twin (up to 4 in
+\texttt{qp\_twin16\_n4}) into the finished composite. ``Twin'' is the twin weight $w$, varied over $\{4,8,16,32,64\}$ in the
+\texttt{qp\_twin}$w$ arms ($w=1$ in the screening only). The parent of an arm is \texttt{recipe} for the LIDC arms, \texttt{qp} for the
+first Qure.ai arms and \texttt{qp\_twin16} for the last four rows.}
+\label{tab:arms}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lccc>{\raggedright\arraybackslash}p{0.36\linewidth}@{}}
+\toprule
+Arm & Source & Lesions & Twin & Change \\
+\midrule
+\texttt{recipe} & LIDC & 0 & none & v1 baseline \\
+\texttt{nodule\_loss} & LIDC & 0 & none & lesion-weighted loss \\
+\texttt{clia} & LIDC & 3 & none & counterfactual insertion \\
+\texttt{clia\_nodule} & LIDC & 3 & none & insertion and lesion-weighted loss \\
+\texttt{qp} & Qure & 0 & none & Qure.ai projections (no-twin control) \\
+\texttt{qp\_clia} & Qure & 3 & none & insertion only, no tie term \\
+\texttt{qp\_twin}$w$ & Qure & 3 & varied & twin regulariser \\
+\texttt{qp\_twin16\_sg} & Qure & 3 & 16 & stop-gradient on the un-pasted branch \\
+\texttt{qp\_twin16\_wide} & Qure & 3 & 16 & support dilated with a $31\times31$ window \\
+\texttt{qp\_twin16\_all} & Qure & 3 & 16 & whole-image support \\
+\texttt{qp\_twin16\_n4} & Qure & 3 & 16 & four lesions per twin \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Encoder screen and model selection}
+\label{sec:m-encoders}
+To check whether a newer encoder helps under the same recipe, ConvNeXt V2 \cite{woo2023convnextv2}, DINOv3 \cite{simeoni2025dinov3} and
+RAD-DINO \cite{perezgarcia2025raddino} were trained at a reduced budget, and an encoder moved to the full budget only if it met a rule
+fixed in advance: at \num{100000} samples, absorption $A\le0.070$ on the development audit with bone-region PSNR$_{\mathrm{cal}}\ge21.60$~dB
+on the development pairs, or PSNR$_{\mathrm{cal}}\ge21.95$~dB with $A\le0.100$ (Supplementary Table~S7). The thresholds come from the
+SwinV2-T range at that budget and were written after one SwinV2-B run had been seen. Pretrained encoders other than SwinV2 are trained with
+a learning rate $0.25\times$ that of the decoder; ConvNeXt-V2-T diverged at the full rate (fp16 overflow) and was rerun at $0.25\times$, an
+extension of the rule written for vision transformers. DINOv3 ViT-S/16 did not improve on SwinV2-T, RAD-DINO ViT-B/14 missed the rule on
+PSNR by 0.05~dB but was continued at the full budget as an exploratory encoder, and ConvNeXt-V2-T met it.
+
+\emph{Ours} is the ensemble of three ConvNeXt-V2-T UNet++/CBAM suppressors (seeds 0--2) trained on the Qure.ai projections with twin weight
+$w=16$. It replaced the planned SwinV2-T configuration under a replacement rule declared before the final runs; the screening rule only
+decided which encoders were trained at the full budget, and the replacement rule applies to every full-budget candidate. At two seeds
+(development data) RAD-DINO reached $A=0.046$ and bone-region PSNR$_{\mathrm{cal}}=21.92$\,dB and ConvNeXt-V2-T $A=0.050$ and $22.01$\,dB;
+both met the replacement rule, and the tie-break declared in advance (mean absorption within 0.005, then the higher bone-region PSNR) chose
+ConvNeXt-V2-T, the only encoder that passed both rules, so excluding RAD-DINO would not have changed the choice. With the third seeds the
+absorption gap is 0.0055, just outside the band; the choice was not reopened, and both encoders are reported. The SwinV2-T and RAD-DINO
+pairs (twin and no twin, three seeds each) are secondary.
+
+\subsubsection{Comparators}
+Comparators are the \emph{no-twin control} (same encoder, data and recipe, $w=0$, three seeds); the v1 model trained on LIDC-IDRI only
+(\texttt{clia}, the planned pick of the v1 study); the publicly released weights of Angaitkar et al. \cite{angaitkar2026anatomy} (SwinV2-B
+at $1024$~px; research licence), called the \emph{reference model}; and three controls that need no training: identity, CLAHE
+\cite{zuiderveld1994clahe} and a homomorphic filter \cite{oppenheim1968homomorphic}. All methods are scored with the same code on the same
+images. BS-LDM \cite{sun2026bsldm}, trained on dual-energy pairs of the SZCH hospital, is shown for orientation only.
+
+\subsubsection{Deep ensemble, split-conformal intervals and recalibration}
+\label{sec:m-ensemble}
+The reported model is a deep ensemble of $K=3$ suppressors trained with seeds $0$, $1$ and $2$ \cite{lakshminarayanan2017ensembles}; seed
+$3$ is a reserve. The bone image is the ensemble mean, the soft image is $x$ minus that mean, and the per-pixel spread is the ensemble
+standard deviation:
+\begin{equation}
+\begin{gathered}
+\bar f_p=\frac1K\sum_{k=1}^{K}f_k(x)_p,\qquad \hat s=x-\bar f,\\
+\sigma_p=\Big(\frac{1}{K-1}\sum_{k=1}^{K}\big(f_k(x)_p-\bar f_p\big)^2\Big)^{1/2}.
+\end{gathered}
+\label{eq:ensemble}
+\end{equation}
+With the score $r_p=|b_p-\bar f_p|/(\sigma_p+\varepsilon)$, $\varepsilon=10^{-3}$, a split-conformal scale $q$ is the
+$\lceil (n+1)(1-\alpha)\rceil$-th smallest of the $n$ scores pooled over calibration pixels of the Qure.ai validation CTs, and the
+interval
+\begin{equation}
+\mathcal{C}_p=\big[\bar f_p-q\,(\sigma_p+\varepsilon),\;\bar f_p+q\,(\sigma_p+\varepsilon)\big]
+\label{eq:conformal}
+\end{equation}
+has nominal coverage $1-\alpha=0.9$ \cite{lei2018conformal,angelopoulos2023conformal}. Calibration treats pixels as exchangeable, so the
+guarantee is marginal over pixels, not over images.
+
+\emph{Recalibration on real pairs (H9, post hoc).} After the intervals were found not to transfer to real radiographs
+(Section~\ref{sec:res-uq}), an exploratory recalibration on the 24 SZCH development pairs was added and tested on the 51 held-out pairs
+(pseudo-truth bone $b=x-s_{\mathrm{DES}}$ after a gain and offset fit). Each pixel is assigned a stratum
+\begin{equation}
+\begin{gathered}
+k(p)=3\cdot\mathbf{1}\big[\bar f_p>0.25\,p_{99}(\bar f)\big]+t(\sigma_p)\in\{0,\dots,5\},\\
+q_k=r^{(k)}_{(\lceil (n_k+1)(1-\alpha)\rceil)},
+\end{gathered}
+\label{eq:mondrian}
+\end{equation}
+where $t(\sigma_p)\in\{0,1,2\}$ is the spread tercile (edges from the calibration pixels) and $r^{(k)}_{(j)}$ the $j$-th smallest of the
+$n_k$ calibration scores in stratum $k$; the interval of Eq.~\eqref{eq:conformal} then uses $q_{k(p)}$ (Mondrian calibration). The global
+variant uses one stratum, and a per-image variant replaces the pooled pixel scores by the per-image $(1-\alpha)$ quantiles, calibrated at
+level 0.1. The sparsification curve is the mean absolute error of the pixels that remain after removing the fraction $f\in[0,0.95]$ with
+the largest spread; AUSE is the area between this curve and the oracle curve that removes pixels by their error (0 is perfect).
+
+\subsubsection{Audit sites and lesions}
+\label{sec:m-audit}
+Lesions come from the CTs of the LIDC-IDRI test split only, so no audited lesion was seen in training. On each real radiograph six sites are
+drawn at random positions inside the lung fields at $\alpha=1$; the sites depend only on the image, its lung mask, the lesion library and a
+fixed seed, and are shared by every model. Lung masks come from the PSPNet anatomical segmentation model of TorchXRayVision
+\cite{cohen2022torchxrayvision}, eroded by 49~px at $1024$~px so that a site lies inside the lung field; the model comes from the ChestX-Det
+project \cite{lian2021chestxdet}, whose paper does not fully document its training data. The library holds 296 nodules (4.0 to 37.6~mm,
+median 7.1~mm); six sites per image give 1,470 sites on VinDr-RibCXR, 1,482 on JSRT and 450 on SZCH. Because the PSPNet masks differ
+slightly between GPUs, the masks were exported once on one machine and every evaluation reads them, so every model is scored on identical
+sites.
+
+The bone overlap of a site is measured with independent information, never with a model output: the radiologist rib masks of VinDr-RibCXR
+\cite{nguyen2021ribcxr} for the confirmatory audit, and the real dual-energy bone signal on SZCH. A site \emph{overlaps bone} when at least
+15\,\% of its support lies on an annotated rib. On JSRT no bone reference exists; the protocol named the consensus of the bone maps of ours
+and of the reference model, but the audit took the overlap from the reference model's bone map alone (a secondary analysis;
+Supplementary Section~S1).
+
+\emph{Why the audit is not circular.} The twin regulariser pastes lesions to teach invariance, and the audit pastes lesions to measure it,
+so a model could pass the audit by learning the insertion artefact. Four design choices limit this. The audit lesions come from CTs that
+were never used for training; the audit images are real radiographs, whereas the training composites are synthetic; the confirmatory audit
+uses rib masks that no model has seen; and the claim that the regulariser helps is also tested with evidence that does not use insertion:
+contrast of real nodules on JSRT and Node21, detection of real lesions, and detection recall grouped by bone overlap (H4$'$). These choices
+limit the circularity but cannot remove it: a model that recognises pasted signal in general could still score well, which is why the
+evidence without insertion is reported beside the audit (Section~\ref{sec:limitations}).
+
+\emph{Audit variants.} On the Qure.ai test split the lesion is added to the soft component, the true bone image is known, and the bone
+error inside the lesion support can be measured against it in addition to $A$ (exact-truth audit, Supplementary Table~S5). The SZCH audit
+ran on all 75 SZCH images (450 sites) during development and is reported as development evidence only; the SZCH contrasts in the result
+tables use its 51 held-out images (306 sites). In an amplitude sweep, $A$ is recomputed for $\alpha\in\{0.25,0.5,1,2,4\}$ on the 450 SZCH
+sites (development data, Supplementary Table~S6). For $\alpha\le1$ the absorption is flat (v1 model 0.301--0.306, no-twin model
+0.215--0.218, reference model 0.134--0.136), so the leak is linear in the lesion amplitude; at $\alpha=2$ and 4 it falls for every model,
+where the added signal starts to saturate at the top of the intensity range.
+
+\subsubsection{Fidelity and suppression measures on real images}
+\label{sec:m-fidelity}
+\emph{Paired dual-energy data.} Tone differs between a radiograph and its DES image, so metrics on the SZCH pairs are reported as is
+(``raw'') and after a per-image least-squares gain and offset of the estimate $\hat s$ onto the reference $s$ (``calibrated'', primary):
+\begin{equation}
+\begin{gathered}
+(\hat a,\hat c)=\arg\min_{a,c}\sum_p\big(a\,\hat s_p+c-s_p\big)^2,\\
+\mathrm{PSNR}_{\mathrm{cal}}=10\log_{10}\frac{1}{\frac{1}{|\Omega|}\sum_{p\in\Omega}\big(\mathrm{clip}_{[0,1]}(\hat a\,\hat s_p+\hat c)-s_p\big)^2},
+\end{gathered}
+\label{eq:psnrcal}
+\end{equation}
+with intensities in $[0,1]$ and $\Omega$ the evaluated region; SSIM$_{\mathrm{cal}}$ uses the same calibrated estimate. Calibrated PSNR and
+SSIM are also reported inside the region where DES removed the most signal (top 10\,\% of calibrated radiograph minus DES, the bone region)
+and outside it. Paired fidelity also uses PSNR and SSIM \cite{wang2004ssim} on the whole image, band-limited SSIM, MS-SSIM
+\cite{wang2003msssim}, LPIPS \cite{zhang2018lpips} and a high-frequency energy ratio; the same smoothing is applied to every method and never
+tuned.
+
+\emph{Rib benchmark.} On VinDr-RibCXR (245 images; evaluated locally, never used for training) we compare the gradient magnitude
+$G(I)=\lvert\nabla(g_{1}*I)\rvert$ (Sobel operator after a Gaussian blur of 1~px) of the suppressed image $\hat s$ with that of the
+radiograph $x$:
+\begin{equation}
+\begin{gathered}
+R_{\mathrm{rib}}=1-\frac{\sum_{p\in\mathcal{R}}G(\hat s)_p}{\sum_{p\in\mathcal{R}}G(x)_p},\\
+R_{\mathrm{non}}=1-\frac{\sum_{p\in\mathcal{N}}G(\hat s)_p}{\sum_{p\in\mathcal{N}}G(x)_p},
+\end{gathered}
+\label{eq:rib}
+\end{equation}
+where $\mathcal{R}$ is the rib-boundary band inside the lungs and $\mathcal{N}$ the lung pixels away from ribs. We report both, their
+difference $R_{\mathrm{rib}}-R_{\mathrm{non}}$ (selectivity) and the ROC-AUC of the gradient-reduction map for separating the two sets of
+pixels.
+
+\emph{Real-nodule contrast.} For a nodule box $\mathcal{B}$ on JSRT or Node21 and the ring $\mathcal{U}$ around it (the box grown by half
+its size on each side),
+\begin{equation}
+\begin{gathered}
+\mathrm{CNR}(I)=\frac{\mathrm{mean}_{\mathcal{B}}(I)-\mathrm{mean}_{\mathcal{U}}(I)}{\mathrm{sd}_{\mathcal{U}}(I)},\\
+\Delta\mathrm{CNR}=\mathrm{CNR}(\hat s)-\mathrm{CNR}(x),
+\end{gathered}
+\label{eq:cnr}
+\end{equation}
+compared between suppressors as paired differences per nodule.
+
+\subsubsection{Site-appearance calibration (exploratory)}
+\label{sec:m-sitecal}
+BS-LDM, trained on dual-energy pairs of the SZCH hospital, scores far higher than any CT-supervised model on the held-out pairs
+(Section~\ref{sec:res-fidelity}). After the H2$'$ results were known, diagnostics on the 24 development pairs only asked why. Subtracting
+more of the bone estimate lowered PSNR$_{\mathrm{cal}}$ rather than raising it; a bone signal known exactly but predicted at 512\,px would
+reach 41.7\,dB, so resolution does not limit it; and most of the error was broader than 64\,px and present in the unprocessed radiograph
+as well. The dual-energy images of this site therefore differ from a radiograph minus its bone image by a smooth appearance field that the
+per-image gain and offset of the metric cannot absorb (Fig.~\ref{fig:sitecal_diag}). A protocol written before any held-out pair was scored
+with it tests a smooth correction of this field:
+\begin{equation}
+\begin{gathered}
+\hat s'=\hat s+U(F w),\\
+w=\arg\min_{w}\sum_{i\in\mathcal{D}}\big\lVert \Pi\,G_{16}(s_i-\hat s_i)-F_i w\big\rVert_2^2+\lambda N\lVert w\rVert_2^2,
+\end{gathered}
+\label{eq:sitecal}
+\end{equation}
+where $\mathcal{D}$ are the 24 development pairs with dual-energy soft-tissue images $s_i$ and estimates $\hat s_i$, $G_{16}$ is a Gaussian
+blur of 16\,px at 1024\,px, $\Pi$ samples a $64\times64$ grid, $F_i$ holds on that grid the features $[1,u,v,u^2,v^2,uv,I,I^2,B,Iv,Iu]$
+(position $u,v$; blurred radiograph $I$ and bone estimate $B=x-\hat s$), $\lambda=10^{-3}$, $N$ is the number of grid samples and $U$ is
+bicubic upsampling. One $w$ is fitted per method in the same way (identity, ours, no-twin control, v1 model, reference model) and applied
+unchanged to the 51 held-out pairs; BS-LDM, trained on this site's images, is not corrected. The fitted weight on $B$ is about $+0.35$ for
+every CT-supervised model, so the correction adds back about a third of the smoothed bone estimate. The correction adds only a smooth field
+and so cannot restore an erased lesion. Its hypotheses H16--H18 are stated in Section~\ref{sec:m-stats}. The analysis is exploratory: it
+re-uses held-out pairs already used for H2$'$, H2$'$ stays as reported, and calibrated numbers are always shown beside the uncorrected ones.
+
+\begin{figure*}[!t]
+\centering
+\safefig[0.9\textwidth]{figures/fig_sitecal_diag.pdf}
+\caption{Development-pair diagnostics behind the site calibration (24 SZCH development pairs; the held-out pairs were not used). (a)
+Calibrated PSNR of the whole image and of the bone region when the bone estimate is subtracted with gain $k$ ($k=1$ as trained):
+subtracting more lowers PSNR for both CT-supervised models. (b) Whole-image PSNR of ours as is, after the leave-one-out site correction of
+Eq.~\eqref{eq:sitecal}, if every error component broader than 64 or 16\,px were removed, and for an oracle that knows the dual-energy bone
+signal exactly but only at 512\,px.}
+\label{fig:sitecal_diag}
+\end{figure*}
+
+% ---------------------------------------------------------------------------------------------------------------------
+\subsection{Downstream Detection and Classification}
+\label{sec:m-downstream}
+The downstream classifier is a DenseNet-121 \cite{huang2017densenet} and the detector a Faster R-CNN with a ResNet-50 FPN backbone
+\cite{ren2017fasterrcnn}, with identical settings for every input variant. The classifier sees $256$~px images, is trained for 10 epochs
+with AdamW \cite{loshchilov2019adamw} (learning rate $3\times10^{-4}$, weight decay $10^{-4}$, batch 64, cosine schedule) and keeps the
+epoch with the best validation macro-AUROC. The detector sees $512$~px images, is trained for 12 epochs with SGD (learning rate 0.01,
+momentum 0.9, weight decay $10^{-4}$, batch 8) and keeps the epoch with the best validation CPM. Each input is trained with three seeds:
+the original radiograph, the soft-tissue image of ours or of the reference model, CLAHE, and a multi-channel input that stacks images as
+channels (for the classifier the original and our soft image, for the detector the original, our soft and our bone image).
+Classification uses NIH ChestX-ray14 (macro-AUROC). Detection uses Node21, TBX11K and VinBigData and is scored by FROC sensitivity at fixed false-positive rates, averaged as
+the competition performance metric (CPM) \cite{vanginneken2010anode09,niemeijer2011cpm}, and by mAP@50; detection metrics treat tied scores
+as one threshold, so they do not depend on the order in which a sort returns ties.
+
+% ---------------------------------------------------------------------------------------------------------------------
+\subsection{Study~II: Multi-Stream Fusion with Capacity-Matched Controls}
+\label{sec:m-study2}
+
+\subsubsection{Rationale}
+With the frozen suppressor ensemble $\bar f$ of Study~I, a classifier can receive the radiograph $X$, the soft-tissue image
+$S=X-\bar f(X)$ and the bone image $\hat B=\mathrm{clip}_{[0,1]}(X-S)$ on the stored 8-bit scale. Because $(S,\hat B)$ is a deterministic
+function of $X$, the inputs carry no new information about a label $Y$:
+\begin{equation}
+I\big(Y;\,X,S,\hat B\big)=I\big(Y;\,X\big).
+\label{eq:info}
+\end{equation}
+A gain can therefore come only from the prior the suppressor learned from CT, or from the inductive bias of the network that reads the
+extra images; a network that reads three images also spends three times the encoder computation. The study separates these sources with a
+control of the same capacity, and it analyses the effect per finding group, because suppression could help focal lesions behind ribs while
+removing cues for diffuse or pleural findings.
+
+\subsubsection{Input configurations and network}
+Five configurations were trained with identical settings (Figs.~\ref{fig:architecture}b and~\ref{fig:cls_design}):
+\emph{orig} ($X$), \emph{soft} ($S$), \emph{early} ($X$, $S$ and $\hat B$ as the three input channels of one stream), \emph{hybrid} (three
+streams $X$, $S$, $\hat B$) and \emph{ctrl} (the hybrid network with $X$ in all three streams). The soft-tissue image comes from our
+suppressor ensemble run at its input size of 512\,px; classifiers see all images at $256\times256$\,px. One DenseNet-121 encoder $E$
+\cite{huang2017densenet} with shared weights, pretrained on ImageNet \cite{deng2009imagenet,wightman2019timm}, processes each stream $u_s$.
+Each stream is standardised per image and passed through its own learned affine map, because the bone image spans a narrow intensity range;
+the $8\times8$ encoder output is projected to $D=256$-dimensional tokens with a stream embedding $e_s$ and a two-dimensional sine position
+code $\pi_n$:
+\begin{equation}
+\begin{gathered}
+\tilde u_s=\gamma_s\,\frac{u_s-\mathrm{mean}(u_s)}{\mathrm{sd}(u_s)}+\beta_s,\\
+z_{s,n}=W\,E(\tilde u_s)_n+e_s+\pi_n\in\mathbb{R}^{D}.
+\end{gathered}
+\label{eq:tokens}
+\end{equation}
+A two-layer decoder with eight heads and one learned query $q_c$ per class attends to the tokens of all streams, as in query-based
+multi-label heads \cite{liu2021query2label,ridnik2023mldecoder}, and a linear map per class gives the logit $\ell_c$ from the decoder
+output $o_c$. With keys $k_{s,n}$, the head-averaged cross-attention of the last layer defines the routing of class $c$ to stream $s$:
+\begin{equation}
+\begin{gathered}
+a_{c,(s,n)}=\operatorname*{softmax}_{(s,n)}\Big(\frac{q_c^{\top}k_{s,n}}{\sqrt{D}}\Big),\\
+\rho_{c,s}=\sum_{n}a_{c,(s,n)},\qquad
+\ell_c=w_c^{\top}o_c+b_c.
+\end{gathered}
+\label{eq:routing}
+\end{equation}
+Single-stream configurations use the same encoder and decoder over 64 tokens. The shared encoder gives the hybrid the parameters of a
+single-stream model plus the decoder, at three times the encoder computation; \emph{ctrl} has exactly the hybrid's parameters and
+computation but no suppression.
+
+\begin{figure*}[!t]
+\centering
+\safefig[0.9\textwidth]{figures/fig_study_design.pdf}
+\caption{Fusion study design. (a) The three inputs for an NIH ChestX-ray14 test image: the radiograph $X$, the soft-tissue image $S$
+predicted by the suppressor and the bone image $\hat B=X-S$ (box: expert annotation of a focal finding). (b) The five configurations, all
+with the same DenseNet-121 encoder, class-query decoder and training settings. In the hybrid and the control one encoder with shared
+weights processes each stream and the decoder attends to the tokens of all three; the control receives $X$ three times. Bottom: the
+contrasts tested.}
+\label{fig:cls_design}
+\end{figure*}
+
+\subsubsection{Training}
+The loss is the binary cross-entropy over the annotated labels $\mathcal{V}$ of a batch (one-hot targets for the three BDCXR-3257 classes):
+\begin{equation}
+\mathcal{L}_{\mathrm{cls}}=-\frac{1}{|\mathcal{V}|}\sum_{(i,c)\in\mathcal{V}}\Big[y_{ic}\log\sigma(\ell_{ic})+(1-y_{ic})\log\big(1-\sigma(\ell_{ic})\big)\Big].
+\label{eq:bce}
+\end{equation}
+Training used AdamW \cite{loshchilov2019adamw} (learning rate $3\times10^{-4}$, weight decay $10^{-4}$), batch size 32, 20 epochs with a
+cosine schedule after 200 warm-up steps, and mixed precision. Augmentation: random rotation by up to $7^\circ$, scaling by 0.9--1.1,
+translation by up to 3\,\% of the image size, and brightness and contrast changes, identical across the channels of an image. The epoch with
+the best validation macro-AUROC was kept. Every configuration was trained with seeds 0--4 on NIH ChestX-ray14 and VinBigData and with seeds
+0--4 in each of the five BDCXR-3257 folds of Section~\ref{sec:m-bdcxr}, giving 175 runs. A configuration's prediction is the seed ensemble
+\begin{equation}
+\bar p_c(x)=\frac15\sum_{k=0}^{4}\sigma\big(\ell^{(k)}_c(x)\big),
+\label{eq:seedens}
+\end{equation}
+and all tests compare seed ensembles. Runs used cloud T4 GPUs; a run longer than one session resumed from an end-of-epoch checkpoint, which
+gave the same predictions as uninterrupted training in a test.
+
+\subsubsection{Encoder selection}
+We screened four encoders on the NIH validation split (configuration \emph{orig}, seed 0, 10 epochs): DenseNet-121, ConvNeXt-V2-T
+\cite{woo2023convnextv2}, RAD-DINO \cite{perezgarcia2025raddino} and SwinV2-B \cite{liu2022swinv2}. The best encoder would go forward with
+DenseNet-121, and an encoder within 0.005 of the best would yield to a cheaper one. All four reached validation macro-AUROC between 0.8384
+and 0.8430, and DenseNet-121 was the cheapest, so it went forward alone. ConvNeXt-V2-T failed to train at the planned learning rate;
+following the rule of the suppressor study, the three encoders without batch normalisation were screened again with the encoder learning
+rate reduced fourfold, a change decided before the other screen results were seen (Supplementary Section~S1).
+
+\subsubsection{Finding groups}
+Before any run, the classes were grouped as \emph{focal} (NIH: nodule, mass; VinBigData: nodule/mass), \emph{diffuse} (effusion,
+infiltration, consolidation, oedema, pneumonia; VinBigData: pleural effusion, infiltration, consolidation, lung opacity, interstitial lung
+disease) and \emph{boundary} (cardiomegaly, atelectasis, pneumothorax, pleural thickening, emphysema, fibrosis, hernia; VinBigData:
+cardiomegaly, atelectasis, pneumothorax, pleural thickening, aortic enlargement, pulmonary fibrosis, calcification). VinBigData's ``other
+lesion'' belongs to no group, and BDCXR-3257 (normal, bacterial or viral pneumonia) enters only the overall tests. For a group $G$ of classes
+and two configurations $m$ and $m'$,
+\begin{equation}
+\begin{gathered}
+\mathrm{AUROC}_{\mathrm{macro}}(m)=\frac1C\sum_{c=1}^{C}\mathrm{AUROC}_c(m),\\
+\Delta_G(m,m')=\frac{1}{|G|}\sum_{c\in G}\big(\mathrm{AUROC}_c(m)-\mathrm{AUROC}_c(m')\big).
+\end{gathered}
+\label{eq:group}
+\end{equation}
+
+\subsubsection{Attribution maps and the pointing game}
+\label{sec:m-xai}
+For each hybrid model, Grad-CAM++ \cite{chattopadhay2018gradcampp} was computed per stream on the last encoder block. Integrated Gradients
+\cite{sundararajan2017axiomatic} was computed on the three inputs jointly against a blurred baseline ($\sigma=8$\,px, 32 steps), because a
+black image has no contrast after standardisation; the decoder attention was read from its last layer. A target $t$ is a pair of test image
+and box class; a map $M_m$ hits when its maximum lies inside a box of that class, with a tolerance of 15\,px at 256\,px fixed in advance
+\cite{zhang2018topdown}. With $h^{(k)}_m(t)\in\{0,1\}$ the hit of map $m$ of the seed-$k$ hybrid model, focal targets $\mathcal{F}$
+(masses and nodules) and the other targets $\mathcal{O}$ (six box classes),
+\begin{equation}
+\begin{gathered}
+d(t)=\frac15\sum_{k=0}^{4}\big(h^{(k)}_{S}(t)-h^{(k)}_{X}(t)\big),\\
+I=\frac{1}{|\mathcal{F}|}\sum_{t\in\mathcal{F}}d(t)-\frac{1}{|\mathcal{O}|}\sum_{t\in\mathcal{O}}d(t),
+\end{gathered}
+\label{eq:pointing}
+\end{equation}
+and H10 tests $I>0$ with an image-cluster bootstrap (\num{10000} resamples; Eq.~\eqref{eq:bootp}).
+
+\subsubsection{Classification uncertainty}
+\label{sec:m-clsuq}
+\emph{NIH: false-negative risk control.} An image's label set holds every class with ensemble probability at least $1-\lambda$; the threshold
+is calibrated on the validation split (\num{8634} images) by conformal risk control \cite{angelopoulos2022crc} and the false-negative rate is
+measured on the test split:
+\begin{equation}
+\begin{gathered}
+\mathcal{C}_\lambda(x)=\{c:\bar p_c(x)\ge1-\lambda\},\\
+\hat R_n(\lambda)=\frac1n\sum_{i=1}^{n}\Big(1-\frac{|\mathcal{C}_\lambda(x_i)\cap Y_i|}{|Y_i|}\Big),\\
+\hat\lambda=\min\Big\{\lambda:\frac{n\,\hat R_n(\lambda)+1}{n+1}\le\alpha\Big\},
+\end{gathered}
+\label{eq:crc}
+\end{equation}
+over the $n$ calibration images with at least one positive label $Y_i$, at $\alpha=0.10$.
+
+\emph{BDCXR-3257: class-conditional sets.} With probabilities normalised to sum to one, $\hat p_y=\bar p_y/\sum_{y'}\bar p_{y'}$, the score
+$1-\hat p_y$ is calibrated separately for each true class \cite{vovk2005algorithmic}, on the other folds' out-of-fold predictions for each
+test fold:
+\begin{equation}
+\begin{gathered}
+\mathcal{C}(x)=\{y:1-\hat p_y(x)\le q_y\},\\
+q_y=\text{the }j_y\text{-th smallest of }\{1-\hat p_{y_i}(x_i):y_i=y\},\\
+j_y=\lceil (n_y+1)(1-\alpha)\rceil.
+\end{gathered}
+\label{eq:mondriansets}
+\end{equation}
+
+\emph{Selective classification.} Images are ranked by a confidence score and the most confident fraction is kept
+\cite{geifman2017selective,geifman2019bias}. Score A is one minus the entropy $H$ of the seed ensemble (mean binary entropy over the 14
+labels for NIH, Shannon entropy of the normalised probabilities for BDCXR-3257); score B adds the suppressor's own uncertainty,
+$-(z_H+z_\sigma)$, where $\sigma$ is the spread of Eq.~\eqref{eq:ensemble} averaged over the lung field and $z$ standardises over the
+evaluated images of a data set. With the losses $\ell_{(1)},\dots,\ell_{(N)}$ sorted by decreasing confidence (Brier score for NIH, top-1
+error for BDCXR-3257),
+\begin{equation}
+\mathrm{AURC}=\frac1N\sum_{k=1}^{N}\frac1k\sum_{j=1}^{k}\ell_{(j)}.
+\label{eq:aurc}
+\end{equation}
+
+% ---------------------------------------------------------------------------------------------------------------------
+\subsection{External Validation on Paediatric Radiographs}
+\label{sec:m-bdcxr}
+The protocol of this validation was fixed before any model of this study saw a BDCXR-3257 image; its one later change, the duplicate
+grouping, was made from the images alone before any model ran (Supplementary Section~S1). All suppressors are the frozen models; only the
+downstream classifiers are trained. (E1, primary) Pneumonia classification with three one-vs-rest outputs, inputs as in H4$'$b (original,
+ours, reference model, CLAHE, original plus ours), the classifier settings of the downstream protocol, five folds stratified by class over
+the near-duplicate groups (fold seed 0) with 10\,\% of each training part, by whole groups, for epoch selection, and three seeds per fold and
+input (75 runs). Out-of-fold probabilities, averaged over seeds, give one prediction per image. The primary measure is the pooled
+macro-AUROC; ours against the original image is non-inferior if the lower bound of the 95\,\% interval of the difference (group bootstrap)
+exceeds $-0.01$, and superior if it exceeds 0; per class, paired DeLong tests with Holm over the three classes. (E2, secondary) The lesion
+audit on a fixed class-stratified subset of 300 images (seed 7), six sites per image, with bone overlap from the reference model's bone map;
+images whose lung mask covers less than 2\,\% of the image are skipped and counted (none was). (E3, descriptive) The per-image ensemble
+spread over the lung field, compared with the held-out SZCH pairs and correlated with age.
+
+% ---------------------------------------------------------------------------------------------------------------------
+\subsection{Statistical Analysis}
+\label{sec:m-stats}
+
+\subsubsection{General framework}
+Hypotheses, margins, test sets and tests were written down before the data they govern were evaluated, and they carry the labels under
+which they were specified (H1$'$--H5$'$ for the final suppressors, H1 for the v1 models, H6--H10 for the fusion study, H16--H18 for the site
+calibration and E1--E3 for the external validation). Analyses added later are labelled exploratory or post hoc, every change made after the
+analyses started is listed in Supplementary Section~S1, and all primary and secondary results are reported whatever their direction.
+
+All comparisons are paired. Confidence intervals are percentile bootstrap intervals \cite{efron1993bootstrap} (\num{10000} resamples unless
+stated) over patients when several units come from one patient; paired differences are tested with the Wilcoxon signed-rank test
+\cite{wilcoxon1945individual}; AUCs are compared with the paired DeLong test \cite{delong1988auc}. Seeds are averaged within unit before
+testing and their spread is reported. Multiplicity is handled by the Holm procedure \cite{holm1979simple} within each family: with the $m$
+$p$-values of a family ordered as $p_{(1)}\le\dots\le p_{(m)}$,
+\begin{equation}
+\tilde p_{(j)}=\max_{i\le j}\,\min\big\{1,\,(m-i+1)\,p_{(i)}\big\}.
+\label{eq:holm}
+\end{equation}
+Confidence intervals are unadjusted 95\,\% intervals; effect sizes are always reported with them, and a hypothesis that fails is reported as
+failed. Non-inferiority uses the paired mean difference $\bar\Delta=\frac1n\sum_i(m_i^{\mathrm{ours}}-m_i^{\mathrm{ref}})$ and the
+one-sided 95\,\% lower bound $L_{95}$ of its image-level bootstrap distribution; it holds if
+\begin{equation}
+L_{95}(\bar\Delta)>-\delta
+\label{eq:ni}
+\end{equation}
+for a margin $\delta$ fixed in advance.
+
+\subsubsection{Study~I hypotheses (H1$'$--H5$'$)}
+\begin{description}
+\item[H1$'$, dose-response.] On VinDr-RibCXR (245 images, six sites each, lesions from LIDC test CTs, $\alpha=1$), the per-site absorption
+ $A$ averaged over seeds falls with the twin weight. With $\bar A_{s,w}$ the absorption at site $s$ averaged over the seeds trained with
+ twin weight $w$, the slope $\beta_1$ of
+ \begin{equation}
+ \bar A_{s,w}=\beta_0+\beta_1\log_2(1+w)+e_{s,w}
+ \label{eq:dose}
+ \end{equation}
+ has an image-cluster bootstrap interval, and H1$'$ passes if its upper bound is below zero. The same analysis on the Qure.ai test split
+ (exact truth) is secondary.
+\item[H2$'$, fidelity.] On the 51 held-out SZCH pairs, bone-region PSNR of ours against the reference model is non-inferior
+ (Eq.~\eqref{eq:ni}) with margin $\delta=0.5$~dB; SSIM has a margin of 0.01 and is reported either way; ours against the no-twin control
+ uses a margin of 0.25~dB (the cost of the regulariser). Metrics are computed calibrated (primary) and raw (Eq.~\eqref{eq:psnrcal}).
+\item[H3$'$, lesion absorption.] On VinDr-RibCXR sites, $A$(ours)$<A$(reference model) and $A$(ours)$<A$(no-twin control), as paired
+ site-level differences with image-cluster bootstrap intervals, Holm over the two contrasts, and an interaction between sites that overlap
+ an annotated rib and sites that do not.
+\item[H4$'$, evidence without insertion.] (a) $\Delta$CNR of real nodules on JSRT and Node21 (Eq.~\eqref{eq:cnr}), ours against the
+ reference model and against the no-twin control, for all lesions and for lesions with at least 15\,\% bone overlap. (b) Downstream: NIH
+ ChestX-ray14 macro-AUROC per input (original, ours, reference model, CLAHE, original plus ours; three seeds); TBX11K, Node21 and
+ VinBigData detection by FROC and mAP@50; recall at two false positives per image for lesions with and without bone overlap, as a
+ difference in differences against the original input.
+\item[H5$'$, reliability.] Spearman correlation between ensemble spread and absolute bone error on the SZCH held-out pairs (pseudo-truth
+ bone from the least-squares-aligned DES image); split-conformal coverage calibrated on Qure.ai validation CTs and measured on the Qure.ai
+ test split (nominal 90\,\%) and, as measured under shift, on SZCH.
+\end{description}
+Site-level differences between models are paired, with image-cluster bootstrap intervals. Bootstrap intervals use \num{10000} resamples for
+mean absorption and contrasts, \num{2000} for the overlap interaction and 500 for the dose-response slope, always resampling whole images
+with replacement. The hypothesis H1 of the v1 models (insertion lowers absorption on synthetic LIDC test CTs at non-inferior bone error) is
+tested in the same way on exact truth.
+
+\emph{Site calibration (exploratory, Section~\ref{sec:m-sitecal}).} H16 (primary) is a gain in the bone-region PSNR$_{\mathrm{cal}}$ of ours
+from the calibration (one-sided 95\,\% lower bound of the paired difference above 0; image bootstrap, \num{10000} resamples) and H16b the
+same for whole-image PSNR$_{\mathrm{cal}}$. H17 is the non-inferiority of the calibrated ours to the calibrated reference model in
+bone-region PSNR$_{\mathrm{cal}}$ (margin 0.5\,dB, as H2$'$). H18 is a lower absorption of the calibrated ours than of the calibrated
+reference model on VinDr-RibCXR, from one audit run with all four models so that they share every site (image-cluster bootstrap, two-sided
+95\,\% upper bound below 0). The rib benchmark of the calibrated models is descriptive. H16 is the only confirmatory test of this analysis;
+the others are reported without multiplicity correction.
+
+\subsubsection{Study~II hypotheses (H6--H10)}
+H9 concerns the suppressor's intervals (Section~\ref{sec:m-ensemble}); the others concern the classifiers.
+\begin{description}
+\item[H6 (primary).] The hybrid has a higher macro-AUROC than \emph{orig}; one test per data set, Holm correction over the three.
+\item[H7 (secondary).] Hybrid against \emph{ctrl} (does a gain come from the suppression or from the extra computation?) and against
+ \emph{early} (do separate streams beat channel stacking?); one Holm family over the six tests.
+\item[H8 (secondary).] $\Delta_G$ of Eq.~\eqref{eq:group} for hybrid and for \emph{soft} against \emph{orig} in each finding group; Holm
+ within data set over the six tests. Per class, hybrid against \emph{orig} and against \emph{early} with the paired DeLong test
+ \cite{delong1988auc}, Holm within data set over classes and both contrasts.
+\item[H10 (secondary).] In the hybrid models, the pointing-game hit rate of the soft-tissue stream minus that of the radiograph stream is
+ larger for focal targets than for the other targets (Eq.~\eqref{eq:pointing}).
+\end{description}
+Every contrast $\Delta$ of two seed ensembles is resampled with a paired cluster bootstrap: replicate $b$ draws clusters with replacement
+(patients for NIH, images for VinBigData, near-duplicate groups for BDCXR-3257), recomputes $\Delta^{*}_b$ with the same resamples for every
+contrast of a data set, and with $B=\num{10000}$ replicates gives the percentile interval $[\Delta^{*}_{(0.025)},\Delta^{*}_{(0.975)}]$ and
+\begin{equation}
+\begin{gathered}
+p=\min\big\{1,\;2\min(p_{-},p_{+})\big\},\\
+p_{-}=\frac{1+\#\{b:\Delta^{*}_b\le0\}}{B+1},\quad p_{+}=\frac{1+\#\{b:\Delta^{*}_b\ge0\}}{B+1}.
+\end{gathered}
+\label{eq:bootp}
+\end{equation}
+AUPRC differences are reported with bootstrap intervals only. The hypotheses, the code and the split files of this study were fixed before
+the encoder screen and before any classifier of this study saw a test split.

@@ -1,0 +1,39 @@
+\section*{Acknowledgment}
+We thank the providers of the data used here: Qure.ai for the CT projections and the released bone-suppression weights, the CT-RATE team,
+The Cancer Imaging Archive and the LIDC-IDRI investigators, the authors of SZCH-X-Rays, VinDr (VinDr-RibCXR and VinDr-CXR), the Japanese
+Society of Radiological Technology (JSRT), the Node21, TBX11K and NIH ChestX-ray14 teams, and Dr.~M~R~Khan Shishu Hospital \& Institute of
+Child Health, Dhaka, for BDCXR-3257 (ethical approval REC-FSIT-2025/No:~11928). \todo{funding and colleagues}
+
+\section*{Ethics Statement}
+This is a retrospective study of existing images. Public data sets were used under their licences, VinDr-RibCXR under its data use
+agreement, and BDCXR-3257 under the ethical approval REC-FSIT-2025/No:~11928 of Daffodil International University and a data use agreement
+with the providing hospital. No new patient data were collected, and no image of a licensed or restricted set is shown.
+
+\section*{Data and Code Availability}
+The public data sets are available from their providers (Table~\ref{tab:data}); the Qure.ai projections are built from CT-RATE volumes
+\cite{hamamci2026ctrate} and are available under CC BY-NC-SA~4.0, and no image derived from them is shown. VinDr-RibCXR was used under its
+data use agreement and is not redistributed. BDCXR-3257 is public on figshare under CC BY 4.0 \cite{durjoy2026bdcxr}; the authors obtained
+it under a data use agreement with the providing hospital and follow its terms, so no image of it is shown and nothing derived from it is
+redistributed. VinBigData was processed only in cloud accounts that accepted the competition rules. Only metrics left these environments,
+and no image, mask, map or model derived from VinDr-RibCXR, VinBigData or BDCXR-3257 images is released.
+
+\emph{Compute.} Training used NVIDIA T4 GPUs in cloud notebooks: a run of \num{300000} samples took 6 to 7 GPU-hours, a screening run of
+\num{100000} samples about 2 GPU-hours. The locked-set evaluation ran on a consumer GPU and on cloud T4 GPUs with identical code; the audit
+sites of every model were pinned to the same lung masks, and model outputs differ between the two GPU types by at most 0.0024\,dB.
+
+\emph{Release.} The code is available under the MIT licence at \url{https://github.com/HTanvir0011/Thesis-full-project}; the three
+checkpoints of the ensemble and a model card are released there for research use under CC BY-NC-SA~4.0, the licence of the training
+projections, as release v1.0.0 with SHA-256 checksums. The reporting follows the
+CLAIM 2024 checklist \cite{tejani2024claim}, which is submitted with the manuscript.
+
+\section*{CRediT Authorship Contribution Statement}
+\todo{author contributions in CRediT terms, for example conceptualisation, methodology, software, formal analysis, writing}
+
+\section*{Declaration of Competing Interest}
+\todo{competing interests, or: The authors declare that they have no known competing financial interests or personal relationships that
+could have appeared to influence the work reported in this paper.}
+
+\section*{Declaration of Generative AI Use}
+During the preparation of this work the authors used an AI assistant (Claude, Anthropic) for code, analysis automation and drafting of the
+text. After using this tool, the authors reviewed and edited the content as needed and take full responsibility for the content of the
+publication. \todo{confirm or adapt this statement to the actual use before submission}

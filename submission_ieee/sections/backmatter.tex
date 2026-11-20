@@ -1,0 +1,104 @@
+% Appendix (IEEE: before the acknowledgment), then the back matter.
+\appendices
+\section{Additional Tables}
+\label{app:extra}
+The secondary fidelity metrics (band-limited SSIM, MS-SSIM, LPIPS, raw metrics and the high-frequency energy ratio) are in
+Table~\ref{tab:szch_heldout}; the per-weight and per-encoder results in Tables~\ref{tab:dose_response} and~\ref{tab:encoders}. The
+deviations from the analysis plans, further results of Studies~II and~III and the per-seed results are in the supplementary material.
+
+\begin{table*}[!t]
+\centering
+\caption{Single-seed results of the final models. The ensembles average seeds 0 to 2; SwinV2-T seed 3 is the reserve.}
+\label{tab:app_seeds}
+\restable[\textwidth]{app_seeds}
+\end{table*}
+
+\begin{table*}[!t]
+\centering
+\caption{Exact-truth audit on the Qure-projection test split (430 projections; lesions added to the soft component): absorption, lesion
+contrast ratio of the soft estimate and bone MAE. The SwinV2-T twin row averages the four seeds of the dose-response arm ($K=4$); the other
+trained models use seeds 0--2.}
+\label{tab:app_qp}
+\restable[\textwidth]{app_qp_audit}
+\end{table*}
+
+\begin{table}[!t]
+\centering
+\caption{Audit amplitude sweep on the 450 SZCH sites (development data, models of 27 October 2026).}
+\label{tab:app_amplitude}
+\restable{app_amplitude}
+\end{table}
+
+\begin{table}[!t]
+\centering
+\caption{Encoder screen at \num{100000} samples, twin weight 16 (development data, rule R1).}
+\label{tab:app_screen}
+\restable{app_encoder_screen}
+\end{table}
+
+\clearpage   % place all result and appendix floats before the back matter and the reference list
+\section*{Acknowledgment}
+We thank the providers of the data used here: Qure.ai for the CT projections and the released bone-suppression weights, the CT-RATE team,
+The Cancer Imaging Archive and the LIDC-IDRI investigators, the authors of SZCH-X-Rays, VinDr (VinDr-RibCXR and VinDr-CXR), the Japanese
+Society of Radiological Technology (JSRT), the Node21, TBX11K and NIH ChestX-ray14 teams, and Dr.~M~R~Khan Shishu Hospital \& Institute of
+Child Health, Dhaka, for BDCXR-3257 (ethical approval REC-FSIT-2025/No:~11928). Training ran on Kaggle GPU quota. \todo{funding and
+colleagues}
+
+\section*{Ethics Statement}
+This is a retrospective study of existing images. Public data sets were used under their licences, VinDr-RibCXR under its data use
+agreement, and BDCXR-3257 under the ethical approval REC-FSIT-2025/No:~11928 of Daffodil International University and a data use agreement
+with the providing hospital. No new patient data were collected, and no image of a licensed or restricted set is shown.
+
+\section*{Data and Code Availability}
+The public data sets are available from their providers (Table~\ref{tab:data}); CT-RATE \cite{hamamci2026ctrate} is available from its
+providers under CC BY-NC-SA~4.0, and no data derived from it beyond metrics and averaged heat maps are shared. VinDr-RibCXR was used under
+its data use agreement and is not redistributed. BDCXR-3257 is public on figshare under CC BY 4.0 \cite{durjoy2026bdcxr}; the authors
+obtained it under a data use agreement with the providing hospital and follow its terms, so no image of either set is shown and nothing
+derived from it is redistributed. VinBigData was processed only in cloud accounts that accepted the competition rules. Only metrics left
+these environments, and no image, mask, map or model derived from VinDr-RibCXR, VinBigData or BDCXR-3257 images is released.
+
+\emph{Analysis plans.} The analysis plans (SAP.md and SAP\_v2.md), the split files, the weights and the code commit were hashed into
+\path{freeze.json} and \path{freeze_v2.json} before any held-out or locked evaluation: \path{freeze.json} on 27 October 2026 (code commit
+\texttt{8e9e3be}) and \path{freeze_v2.json} on 1 November 2026 (commit \texttt{dd52b6a}); the BDCXR-3257 addendum was committed on
+3 November 2026 before any model saw those images, and the classifier study's plan (SAP\_v3.md), code and split files were hashed into
+\path{freeze_v3.json} on 3 November 2026 (commit \texttt{c39aad5}) before its encoder screen. The cross-modality study's plan (SAP\_v4.md),
+its design, code and CT subset list were hashed into \path{freeze_v4.json} on 8 November 2026 before its first training run. The
+exploratory site calibration's plan (SAP\_v5.md), code (\path{s4/site_cal.py}, \path{tools/szch_site_cal.py}) and coefficients fitted on the
+24 development pairs (\path{results/site_cal_coef.json}) were hashed into \path{freeze_v5.json} on 17 November 2026 (commit \texttt{e43c59a})
+before any held-out pair was scored with them. The plans were kept in the project's version control, not deposited in a public registry;
+they and the hash files are supplementary material.
+
+\emph{Reproducing the numbers.} Every table and figure is produced by a script from saved result files; no number in the text is typed by
+hand. From the saved results, \texttt{python} \path{tools/final_stats.py} writes \path{results/final/stats_held.json} and the main tables,
+\texttt{python} \path{tools/paper_extras.py} \texttt{--audit-map} the ablation table and the dose-response, audit-map, downstream and
+reliability figures, \texttt{python} \path{tools/fig_pareto.py} \texttt{final} and \path{tools/fig_real_qualitative.py} the remaining
+figures, and \texttt{python} \path{tools/bdcxr_stats.py} the BDCXR-3257 tables; the evaluations themselves are run by
+\path{tools/final_local.sh} (locally or in cloud kernels). For the classifier study, \texttt{python} \path{tools/hybrid_stats.py} writes
+\path{results/final_hybrid_stats.json} and its tables, and \texttt{python} \path{tools/generate_all_thesis_figures.py} its figures; its 175
+training runs used the Kaggle kernels of the repository. For the cross-modality study, \texttt{python} \path{tools/xm_stats.py} writes
+\path{results/final_xm_stats.json}, \path{tools/xm_tables.py} its tables and \path{tools/fig_v4.py} its figures. For the exploratory site
+calibration, \texttt{python} \path{tools/szch_site_cal.py} with the steps \texttt{heldout}, \texttt{audit}, \texttt{audit\_stats} and
+\texttt{rib} runs it, and \path{tools/site_cal_tables.py} writes its tables. All of this is in the repository
+\url{https://github.com/HTanvir0011/Thesis-full-project} (release v1.0.0).
+
+\emph{Compute.} Training used Kaggle T4 GPUs: a run of \num{300000} samples took 6 to 7 GPU-hours on one T4 (two runs share a two-GPU
+session), a screening run of \num{100000} samples about 2 GPU-hours; the per-run times are in the training logs. The locked-set evaluation
+ran on a consumer GPU and on cloud T4 GPUs with identical code; the audit sites of every model were pinned to the same lung masks, and model
+outputs differ between the two GPU types by at most 0.0024\,dB.
+
+\emph{Release.} The code is released under the MIT licence, and the three checkpoints of the ensemble and a model card for research use
+under CC BY-NC-SA 4.0, the licence of the training projections, as release v1.0.0 of the repository, whose SHA-256 checksums equal the hashes
+frozen before the evaluation. The reporting follows the
+CLAIM 2024 checklist \cite{tejani2024claim}, which is submitted with the manuscript.
+
+\section*{CRediT Authorship Contribution Statement}
+\todo{author contributions in CRediT terms, for example conceptualisation, methodology, software, formal analysis, writing}
+
+\section*{Declaration of Competing Interest}
+\todo{competing interests, or: The authors declare that they have no known competing financial interests or personal relationships that
+could have appeared to influence the work reported in this paper.}
+
+\section*{Declaration of Generative AI Use}
+During the preparation of this work the authors used an AI assistant (Claude, Anthropic) for code, analysis automation and drafting of the
+text. After using this tool, the authors reviewed and edited the content as needed and take full responsibility for the content of the
+publication. \todo{confirm or adapt this statement to the actual use before submission}
